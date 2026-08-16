@@ -82,11 +82,10 @@ Expected response:
 | `MONGODB_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/MissVBusiness` |
 | `JWT_SECRET` | Access-token signing secret; use a long random value in production | development fallback |
 | `FRONTEND_URL` | Allowed CORS origin and email-verification link base | `http://localhost:5173` |
-| `EMAIL_PROVIDER` | Email delivery through `console` or `cloudflare` | `console` |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account for Email Service | empty |
-| `CLOUDFLARE_EMAIL_API_TOKEN` | Cloudflare Email Service API token | empty |
-| `CLOUDFLARE_EMAIL_FROM` | Verified sender email address | empty |
-| `CLOUDFLARE_EMAIL_FROM_NAME` | Sender display name | `Miss V Business` |
+| `EMAIL_PROVIDER` | Email delivery through `console` or `resend` | `console` |
+| `RESEND_API_KEY` | Resend API key with Sending access | empty |
+| `RESEND_EMAIL_FROM` | Sender address on a verified Resend domain | empty |
+| `RESEND_EMAIL_FROM_NAME` | Sender display name | `Miss V Business` |
 | `EMAIL_VERIFICATION_TTL_MINUTES` | Email-verification link lifetime | `1440` |
 | `EMAIL_RESEND_COOLDOWN_SECONDS` | Minimum delay between resend requests | `60` |
 | `EMAIL_MAX_RESENDS_PER_HOUR` | Maximum verification resends per hour | `5` |
@@ -101,7 +100,7 @@ Do not commit a populated `.env` file or real credentials.
 
 Local development uses `EMAIL_PROVIDER=console`. The API prints the verification URL to its terminal and includes it in the non-production registration result.
 
-Production email uses Cloudflare Email Service. Set `EMAIL_PROVIDER=cloudflare` and configure the account ID, API token, and verified sender address. If any required Cloudflare value is missing, the server falls back to console email and prints a warning instead of failing startup.
+Production email uses Resend. Set `EMAIL_PROVIDER=resend` and configure the API key and sender address on a verified Resend domain. If either required value is missing, the server falls back to console email and prints a warning instead of failing startup.
 
 ## Owner authentication
 
@@ -250,7 +249,7 @@ npm run build
 1. Set `NODE_ENV=production`.
 2. Configure a production MongoDB URI and a strong unique `JWT_SECRET`.
 3. Set `FRONTEND_URL` to the exact deployed frontend origin.
-4. Configure Cloudflare Email Service and a verified sender.
+4. Configure Resend and a sender address on a verified domain.
 5. Run `npm install`, `npm run check`, `npm test`, and `npm run build`.
 6. Start the compiled server with `npm start`.
 7. Use HTTPS and back up MongoDB regularly.

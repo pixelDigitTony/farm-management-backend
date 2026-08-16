@@ -59,7 +59,7 @@ export async function issueVerificationEmail(
     emailNormalized: user.emailNormalized,
     tokenHash: hashOpaqueToken(rawToken),
     expiresAt,
-    delivery: { provider: env.EMAIL_PROVIDER === "cloudflare" ? "CLOUDFLARE" : "CONSOLE" },
+    delivery: { provider: env.EMAIL_PROVIDER === "resend" ? "RESEND" : "CONSOLE" },
   });
 
   try {

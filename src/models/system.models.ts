@@ -55,7 +55,8 @@ const emailVerificationTokenSchema = new Schema(
     usedAt: { type: Date, default: null },
     invalidatedAt: { type: Date, default: null },
     delivery: {
-      provider: { type: String, enum: ["CLOUDFLARE", "CONSOLE"], required: true },
+      // Keep CLOUDFLARE for existing delivery history created before the Resend migration.
+      provider: { type: String, enum: ["RESEND", "CONSOLE", "CLOUDFLARE"], required: true },
       status: {
         type: String,
         enum: ["PENDING", "SENT", "QUEUED", "DELIVERED", "FAILED", "BOUNCED"],

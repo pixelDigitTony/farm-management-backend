@@ -1,7 +1,8 @@
+import { Resend } from "resend";
 import { env } from "../config/env.js";
 
 export type EmailDeliveryResult = {
-  provider: "CLOUDFLARE" | "CONSOLE";
+  provider: "RESEND" | "CONSOLE";
   status: "SENT" | "QUEUED" | "DELIVERED" | "BOUNCED";
   messageId: string | null;
 };
@@ -11,17 +12,6 @@ type VerificationEmail = {
   recipientEmail: string;
   verificationUrl: string;
   expiresAt: Date;
-};
-
-type CloudflareResponse = {
-  success: boolean;
-  errors?: Array<{ code: number; message: string }>;
-  result?: {
-    message_id?: string;
-    delivered?: string[];
-    queued?: string[];
-    permanent_bounces?: string[];
-  };
 };
 
 const escapeHtml = (value: string) =>
@@ -36,47 +26,23 @@ const escapeHtml = (value: string) =>
     return entities[character] ?? character;
   });
 
-class CloudflareEmailService {
+class ResendEmailService {
+  private readonly client = new Resend(env.RESEND_API_KEY);
+
   async sendVerificationEmail(input: VerificationEmail): Promise<EmailDeliveryResult> {
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/email/sending/send`,
-      {
-        method: "POST",
-        signal: AbortSignal.timeout(15_000),
-        headers: {
-          Authorization: `Bearer ${env.CLOUDFLARE_EMAIL_API_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          to: input.recipientEmail,
-          from: {
-            address: env.CLOUDFLARE_EMAIL_FROM,
-            name: env.CLOUDFLARE_EMAIL_FROM_NAME,
-          },
-          subject: "Verify your Miss V Business email",
-          html: verificationHtml(input),
-          text: verificationText(input),
-        }),
-      },
-    );
-    const body = (await response.json().catch(() => null)) as CloudflareResponse | null;
-    if (!response.ok || !body?.success) {
-      const firstError = body?.errors?.[0];
-      const error = new Error(
-        firstError?.message ?? `Cloudflare email request failed (${response.status})`,
-      );
-      error.name = firstError ? String(firstError.code) : `HTTP_${response.status}`;
-      throw error;
+    const { data, error } = await this.client.emails.send({
+      to: input.recipientEmail,
+      from: `${env.RESEND_EMAIL_FROM_NAME} <${env.RESEND_EMAIL_FROM}>`,
+      subject: "Verify your Miss V Business email",
+      html: verificationHtml(input),
+      text: verificationText(input),
+    });
+    if (error) {
+      const deliveryError = new Error(error.message);
+      deliveryError.name = error.name ?? "RESEND_ERROR";
+      throw deliveryError;
     }
-    const result = body.result;
-    const status = result?.permanent_bounces?.length
-      ? "BOUNCED"
-      : result?.queued?.length
-        ? "QUEUED"
-        : result?.delivered?.length
-          ? "DELIVERED"
-          : "SENT";
-    return { provider: "CLOUDFLARE", status, messageId: result?.message_id ?? null };
+    return { provider: "RESEND", status: "SENT", messageId: data?.id ?? null };
   }
 }
 
@@ -98,4 +64,4 @@ function verificationText(input: VerificationEmail) {
 }
 
 export const emailService =
-  env.EMAIL_PROVIDER === "cloudflare" ? new CloudflareEmailService() : new ConsoleEmailService();
+  env.EMAIL_PROVIDER === "resend" ? new ResendEmailService() : new ConsoleEmailService();

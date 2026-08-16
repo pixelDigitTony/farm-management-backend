@@ -1,11 +1,11 @@
 import { app } from "./app.js";
 import { connectDatabase, disconnectDatabase } from "./config/database.js";
-import { cloudflareEmailFallbackActive, env } from "./config/env.js";
+import { env, resendEmailFallbackActive } from "./config/env.js";
 
 async function start() {
-  if (cloudflareEmailFallbackActive) {
+  if (resendEmailFallbackActive) {
     console.warn(
-      "Cloudflare email credentials are incomplete. Using the console email sender until Cloudflare is configured.",
+      "Resend email credentials are incomplete. Using the console email sender until Resend is configured.",
     );
   }
   await connectDatabase();

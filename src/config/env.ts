@@ -13,11 +13,10 @@ const envSchema = v.object({
     "development-only-change-this-secret",
   ),
   FRONTEND_URL: v.optional(v.string(), "http://localhost:5173"),
-  EMAIL_PROVIDER: v.optional(v.picklist(["cloudflare", "console"]), "console"),
-  CLOUDFLARE_ACCOUNT_ID: v.optional(v.string()),
-  CLOUDFLARE_EMAIL_API_TOKEN: v.optional(v.string()),
-  CLOUDFLARE_EMAIL_FROM: v.optional(v.pipe(v.string(), v.email())),
-  CLOUDFLARE_EMAIL_FROM_NAME: v.optional(v.string(), "Miss V Business"),
+  EMAIL_PROVIDER: v.optional(v.picklist(["resend", "console"]), "console"),
+  RESEND_API_KEY: v.optional(v.string()),
+  RESEND_EMAIL_FROM: v.optional(v.pipe(v.string(), v.email())),
+  RESEND_EMAIL_FROM_NAME: v.optional(v.string(), "Miss V Business"),
   EMAIL_VERIFICATION_TTL_MINUTES: positiveInteger(1440),
   EMAIL_RESEND_COOLDOWN_SECONDS: v.optional(
     v.pipe(v.unknown(), v.toNumber(), v.number(), v.integer(), v.minValue(0)),
@@ -32,19 +31,17 @@ const envSchema = v.object({
 
 const parsedEnv = v.parse(envSchema, process.env);
 
-export const cloudflareEmailConfigured = Boolean(
-  parsedEnv.CLOUDFLARE_ACCOUNT_ID &&
-    parsedEnv.CLOUDFLARE_EMAIL_API_TOKEN &&
-    parsedEnv.CLOUDFLARE_EMAIL_FROM,
+export const resendEmailConfigured = Boolean(
+  parsedEnv.RESEND_API_KEY && parsedEnv.RESEND_EMAIL_FROM,
 );
 
-export const cloudflareEmailFallbackActive =
-  parsedEnv.EMAIL_PROVIDER === "cloudflare" && !cloudflareEmailConfigured;
+export const resendEmailFallbackActive =
+  parsedEnv.EMAIL_PROVIDER === "resend" && !resendEmailConfigured;
 
 export const env = {
   ...parsedEnv,
   EMAIL_PROVIDER:
-    parsedEnv.EMAIL_PROVIDER === "cloudflare" && cloudflareEmailConfigured
-      ? ("cloudflare" as const)
+    parsedEnv.EMAIL_PROVIDER === "resend" && resendEmailConfigured
+      ? ("resend" as const)
       : ("console" as const),
 };
