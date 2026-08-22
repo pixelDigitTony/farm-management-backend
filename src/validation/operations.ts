@@ -120,6 +120,10 @@ export const pigAcquisitionOperationSchema = v.object({
   notes: v.optional(v.string()),
 });
 
+export const pigAcquisitionCostUpdateSchema = v.object({
+  purchaseCost: amount,
+});
+
 export const slaughterOperationSchema = v.object({
   pigId: v.string(),
   slaughterDate: coercedDate,

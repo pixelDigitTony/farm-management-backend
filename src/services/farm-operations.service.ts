@@ -22,6 +22,7 @@ import type {
   feedUsageOperationSchema,
   inventoryReceiptOperationSchema,
   meatTransferOperationSchema,
+  pigAcquisitionCostUpdateSchema,
   pigAcquisitionOperationSchema,
   piggerySaleOperationSchema,
   pigMeasurementOperationSchema,
@@ -41,6 +42,7 @@ type SlaughterInput = InferOutput<typeof slaughterOperationSchema>;
 type MeatTransferInput = InferOutput<typeof meatTransferOperationSchema>;
 type PigMeasurementInput = InferOutput<typeof pigMeasurementOperationSchema>;
 type PigAcquisitionInput = InferOutput<typeof pigAcquisitionOperationSchema>;
+type PigAcquisitionCostUpdateInput = InferOutput<typeof pigAcquisitionCostUpdateSchema>;
 type PiggerySaleInput = InferOutput<typeof piggerySaleOperationSchema>;
 type CookingBatchInput = InferOutput<typeof cookingBatchOperationSchema>;
 
@@ -342,6 +344,65 @@ export async function postPigAcquisition(businessId: Types.ObjectId, input: PigA
     await pig.deleteOne();
     throw error;
   }
+}
+
+export async function updatePigAcquisitionCost(
+  businessId: Types.ObjectId,
+  pigId: string,
+  input: PigAcquisitionCostUpdateInput,
+) {
+  const pig = await Pig.findOne({ _id: pigId, businessId });
+  if (!pig) throw new HttpError(404, "Pig was not found");
+  const expense = await Expense.findOne({
+    businessId,
+    status: "POSTED",
+    category: "PIG_PURCHASE",
+    "allocations.targetType": "PIG",
+    "allocations.targetId": pig._id,
+  });
+  if (!expense) throw new HttpError(409, "The pig purchase expense was not found");
+
+  const amountPaid = Number(expense.amountPaidCached?.toString() ?? 0);
+  if (amountPaid > input.purchaseCost)
+    throw new HttpError(422, "Purchase cost cannot be less than the amount already paid");
+
+  const previousCost = decimal(pig.purchaseCost?.toString() ?? 0);
+  const nextCost = decimal(input.purchaseCost);
+  const nextAccumulatedCost = decimal(pig.accumulatedCostCached?.toString() ?? 0)
+    .plus(nextCost.minus(previousCost))
+    .toString();
+  const balance = nextCost.minus(amountPaid);
+
+  pig.purchaseCost = nextCost.toString() as any;
+  pig.accumulatedCostCached = nextAccumulatedCost as any;
+  expense.subtotal = nextCost.toString() as any;
+  expense.totalAmount = nextCost.toString() as any;
+  expense.balanceDueCached = balance.toString() as any;
+  expense.paymentStatus = balance.isZero() ? "PAID" : amountPaid > 0 ? "PARTIALLY_PAID" : "UNPAID";
+  if (expense.items[0]) {
+    expense.items[0].unitPrice = nextCost.toString() as any;
+    expense.items[0].lineTotal = nextCost.toString() as any;
+  }
+  const allocation = expense.allocations.find(
+    (item: any) => item.targetType === "PIG" && String(item.targetId) === pig.id,
+  );
+  if (allocation) {
+    allocation.value = nextCost.toString() as any;
+    allocation.allocatedAmount = nextCost.toString() as any;
+  }
+
+  await pig.save();
+  try {
+    await expense.save();
+  } catch (error) {
+    pig.purchaseCost = previousCost.toString() as any;
+    pig.accumulatedCostCached = decimal(nextAccumulatedCost)
+      .minus(nextCost.minus(previousCost))
+      .toString() as any;
+    await pig.save();
+    throw error;
+  }
+  return { pig, expense };
 }
 
 export async function deletePigAcquisition(businessId: Types.ObjectId, pigId: string) {

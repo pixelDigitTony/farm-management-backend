@@ -12,6 +12,7 @@ import {
   postPiggerySale,
   postPigMeasurement,
   postSlaughterRecord,
+  updatePigAcquisitionCost,
   updateSlaughterRecord,
 } from "../services/farm-operations.service.js";
 import { createMenuWithRecipe, updateMenuWithRecipe } from "../services/menu.service.js";
@@ -34,6 +35,7 @@ import {
   karenderiyaSaleUpdateSchema,
   meatTransferOperationSchema,
   menuRecipeOperationSchema,
+  pigAcquisitionCostUpdateSchema,
   pigAcquisitionOperationSchema,
   piggerySaleOperationSchema,
   pigMeasurementOperationSchema,
@@ -129,6 +131,15 @@ operationRouter.post("/pig-acquisitions", async (request, response) =>
         parse(pigAcquisitionOperationSchema, request.body),
       ),
     ),
+);
+operationRouter.patch("/pig-acquisitions/:id/cost", async (request, response) =>
+  response.json(
+    await updatePigAcquisitionCost(
+      getOwner(request).businessId,
+      request.params.id,
+      parse(pigAcquisitionCostUpdateSchema, request.body),
+    ),
+  ),
 );
 operationRouter.delete("/pig-acquisitions/:id", async (request, response) => {
   await deletePigAcquisition(getOwner(request).businessId, request.params.id);
