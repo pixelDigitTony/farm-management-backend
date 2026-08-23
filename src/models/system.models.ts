@@ -129,6 +129,9 @@ const businessSchema = new Schema(
     businessName: { type: String, required: true, trim: true },
     businessNameNormalized: { type: String, required: true, lowercase: true, trim: true },
     ownerUserId: objectId("User"),
+    isArchived: { type: Boolean, default: false },
+    archivedAt: { type: Date, default: null },
+    archivedBy: objectId("User"),
     ownerRole: { type: Number, min: 0, max: 98, default: 0 },
     roles: {
       type: [

@@ -364,6 +364,9 @@ authRouter.post("/login", loginLimiter, async (request, response) => {
   if (["LOCKED", "DISABLED"].includes(owner.status)) {
     throw new HttpError(403, "This account is unavailable", undefined, "ACCOUNT_UNAVAILABLE");
   }
+  if (!(await Business.exists({ _id: owner.businessId, isArchived: { $ne: true } }))) {
+    throw new HttpError(403, "This business account is archived", undefined, "ACCOUNT_ARCHIVED");
+  }
   owner.set(`${securityKey}.failedAttempts`, 0);
   owner.set(`${securityKey}.lockedUntil`, null);
   owner.lastLoginAt = new Date();

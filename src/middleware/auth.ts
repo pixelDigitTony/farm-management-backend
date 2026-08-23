@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { env } from "../config/env.js";
 import { HttpError } from "../lib/http-error.js";
-import { AuthSession, User } from "../models/index.js";
+import { AuthSession, Business, User } from "../models/index.js";
 
 type OwnerToken = { sub: string; businessId: string; sid: string; type: "access" };
 
@@ -17,7 +17,7 @@ export async function requireOwner(request: Request, _response: Response, next: 
     const userId = new mongoose.Types.ObjectId(payload.sub);
     const businessId = new mongoose.Types.ObjectId(payload.businessId);
     const sessionId = new mongoose.Types.ObjectId(payload.sid);
-    const [session, user] = await Promise.all([
+    const [session, user, business] = await Promise.all([
       AuthSession.exists({
         _id: sessionId,
         userId,
@@ -26,8 +26,9 @@ export async function requireOwner(request: Request, _response: Response, next: 
         expiresAt: { $gt: new Date() },
       }),
       User.findOne({ _id: userId, businessId, isActive: true }),
+      Business.exists({ _id: businessId, isArchived: { $ne: true } }),
     ]);
-    if (!session || !user || ["LOCKED", "DISABLED"].includes(user.status))
+    if (!session || !user || !business || ["LOCKED", "DISABLED"].includes(user.status))
       throw new Error("Inactive session");
     request.owner = {
       userId,

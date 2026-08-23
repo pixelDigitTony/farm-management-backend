@@ -3,7 +3,7 @@ import { env } from "../config/env.js";
 import { createOpaqueToken, hashOpaqueToken } from "../lib/auth-utils.js";
 import { HttpError } from "../lib/http-error.js";
 import { createAccessToken } from "../middleware/auth.js";
-import { AuthSession, User } from "../models/index.js";
+import { AuthSession, Business, User } from "../models/index.js";
 
 const refreshCookieName = "miss_v_refresh";
 const refreshMaxAge = env.REFRESH_TOKEN_TTL_DAYS * 86_400_000;
@@ -54,7 +54,10 @@ export async function rotateSession(request: Request, response: Response) {
     isActive: true,
     status: { $nin: ["LOCKED", "DISABLED"] },
   });
-  if (!user) {
+  const businessAvailable = user
+    ? await Business.exists({ _id: user.businessId, isArchived: { $ne: true } })
+    : null;
+  if (!user || !businessAvailable) {
     session.revokedAt = new Date();
     session.revokeReason = "SECURITY";
     await session.save();
