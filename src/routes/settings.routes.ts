@@ -1,7 +1,11 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
 import * as v from "valibot";
-import { normalizeEmail, normalizePhilippinePhone } from "../lib/auth-utils.js";
+import {
+  normalizeBusinessName,
+  normalizeEmail,
+  normalizePhilippinePhone,
+} from "../lib/auth-utils.js";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
 import { AuthSession, Business, SlaughterSetting, User } from "../models/index.js";
@@ -72,11 +76,20 @@ settingsRouter.get("/", async (request, response) => {
 settingsRouter.patch("/business", async (request, response) => {
   const owner = getOwner(request);
   const input = v.parse(settingsSchema, request.body);
+  const businessNameNormalized = normalizeBusinessName(input.businessName);
+  if (
+    await Business.exists({
+      _id: { $ne: owner.businessId },
+      businessNameNormalized,
+    })
+  )
+    throw new HttpError(409, "That company name is already registered");
   const [business, user] = await Promise.all([
     Business.findByIdAndUpdate(
       owner.businessId,
       {
         businessName: input.businessName,
+        businessNameNormalized,
         "piggery.name": input.piggeryName,
         "piggery.address": input.piggeryAddress,
         "karenderiya.name": input.karenderiyaName,

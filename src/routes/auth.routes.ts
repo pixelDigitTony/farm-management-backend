@@ -1,7 +1,12 @@
 import bcrypt from "bcryptjs";
 import { type Request, type Response, Router } from "express";
 import { parse } from "valibot";
-import { hashOpaqueToken, normalizeEmail, normalizePhilippinePhone } from "../lib/auth-utils.js";
+import {
+  hashOpaqueToken,
+  normalizeBusinessName,
+  normalizeEmail,
+  normalizePhilippinePhone,
+} from "../lib/auth-utils.js";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner, requireOwner } from "../middleware/auth.js";
 import {
@@ -42,18 +47,10 @@ const lockDurationMs = 15 * 60_000;
 
 authRouter.get("/setup-status", async (_request, response) => {
   const initialized = (await User.estimatedDocumentCount()) > 0;
-  response.json({ initialized, registrationAvailable: !initialized });
+  response.json({ initialized, registrationAvailable: true });
 });
 
 async function register(request: Request, response: Response) {
-  if ((await User.estimatedDocumentCount()) > 0) {
-    throw new HttpError(
-      409,
-      "Owner registration is already complete",
-      undefined,
-      "REGISTRATION_CLOSED",
-    );
-  }
   const input = parse(registrationSchema, request.body);
   const emailNormalized = normalizeEmail(input.email);
   let phoneNormalized: string;
@@ -63,7 +60,20 @@ async function register(request: Request, response: Response) {
     throw new HttpError(422, error instanceof Error ? error.message : "Invalid phone number");
   }
 
-  const business = await Business.create({ businessName: input.businessName });
+  const businessNameNormalized = normalizeBusinessName(input.businessName);
+  if (await Business.exists({ businessNameNormalized }))
+    throw new HttpError(
+      409,
+      "That company name is already registered",
+      undefined,
+      "COMPANY_EXISTS",
+    );
+  const business = await Business.create({
+    businessName: input.businessName.trim(),
+    businessNameNormalized,
+    ownerRole: 0,
+    roles: [{ level: 0, name: "Owner" }],
+  });
   let owner: InstanceType<typeof User>;
   try {
     owner = await User.create({
@@ -76,6 +86,8 @@ async function register(request: Request, response: Response) {
       passwordHash: await bcrypt.hash(input.password, 12),
       mpinHash: await bcrypt.hash(input.mpin, 12),
       status: "PENDING_EMAIL_VERIFICATION",
+      role: 0,
+      isApproved: false,
     });
     business.ownerUserId = owner._id;
     await business.save();
@@ -165,7 +177,13 @@ authRouter.post("/verify-email", verificationLimiter, async (request, response) 
     owner.pendingEmailNormalized = null;
   }
   owner.emailVerifiedAt = now;
-  owner.status = "ACTIVE";
+  if (Number(owner.role) === 99) {
+    owner.isApproved = true;
+    owner.approvedAt = now;
+    owner.status = "ACTIVE";
+  } else {
+    owner.status = owner.isApproved ? "ACTIVE" : "PENDING_ADMIN_APPROVAL";
+  }
   await owner.save();
   await Promise.all([
     EmailVerificationToken.updateMany(
@@ -343,15 +361,7 @@ authRouter.post("/login", loginLimiter, async (request, response) => {
     if (owner) await recordFailedAttempt(owner, securityKey);
     throw new HttpError(401, "Incorrect credentials", undefined, "INVALID_CREDENTIALS");
   }
-  if (!owner.emailVerifiedAt) {
-    throw new HttpError(
-      403,
-      "Verify your email before signing in",
-      undefined,
-      "EMAIL_NOT_VERIFIED",
-    );
-  }
-  if (owner.status !== "ACTIVE") {
+  if (["LOCKED", "DISABLED"].includes(owner.status)) {
     throw new HttpError(403, "This account is unavailable", undefined, "ACCOUNT_UNAVAILABLE");
   }
   owner.set(`${securityKey}.failedAttempts`, 0);
@@ -394,14 +404,30 @@ authRouter.post("/logout", async (request, response) => {
 
 authRouter.get("/me", requireOwner, async (request, response) => {
   const ownerIdentity = getOwner(request);
-  const owner = await User.findOne({
+  const ownerUser = await User.findOne({
     _id: ownerIdentity.userId,
     businessId: ownerIdentity.businessId,
     isActive: true,
-    status: "ACTIVE",
   });
-  if (!owner) throw new HttpError(401, "Authentication required");
-  response.json({ owner: publicOwner(owner) });
+  if (!ownerUser) throw new HttpError(401, "Authentication required");
+  const business = await Business.findById(ownerIdentity.businessId).select(
+    "businessName ownerRole roles",
+  );
+  response.json({
+    owner: {
+      ...publicOwner(ownerUser),
+      businessName: business?.businessName ?? "Business",
+      isHighestRole:
+        Number(ownerUser.role) === 99 ||
+        Number(ownerUser.role) === Number(business?.ownerRole ?? 0),
+      roleName:
+        Number(ownerUser.role) === 99
+          ? "Super Admin"
+          : (business?.roles?.find(
+              (role: { level: number }) => role.level === Number(ownerUser.role),
+            )?.name ?? `Role ${ownerUser.role}`),
+    },
+  });
 });
 
 async function recordFailedAttempt(

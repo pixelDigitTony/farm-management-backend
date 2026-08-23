@@ -4,6 +4,10 @@ export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+export function normalizeBusinessName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export function normalizePhilippinePhone(phone: string) {
   const digits = phone.replace(/\D/g, "");
   let local: string;

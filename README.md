@@ -6,8 +6,9 @@ The API is the source of truth for all financial and inventory calculations. The
 
 ## Responsibilities
 
-- Register and authenticate the first and only business owner.
-- Verify the owner's email and manage access and refresh sessions.
+- Register unique businesses and authenticate business-scoped users with numeric roles.
+- Gate new businesses behind email verification and role-99 super-admin approval.
+- Manage named roles, employee accounts, and opaque expiring registration links.
 - Track cash accounts, transactions, expenses, and payments in Philippine pesos.
 - Record pig acquisitions, measurements, batches, feed use, and accumulated costs.
 - Calculate slaughter yield, meat-part cost, and inventory lots.
@@ -122,7 +123,7 @@ The API returns a short-lived JWT access token and stores the refresh token in a
 
 ## API routes
 
-All routes except health and authentication require an owner access token in the `Authorization: Bearer <token>` header.
+Business routes require an approved account and an access token in the `Authorization: Bearer <token>` header. Admin approval routes additionally require role `99`.
 
 ### Health
 
@@ -134,9 +135,9 @@ All routes except health and authentication require an owner access token in the
 
 | Method | Route | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/auth/setup-status` | Check whether owner registration is available |
-| `POST` | `/api/auth/register` | Register the first owner |
-| `POST` | `/api/auth/setup` | Alias for first-owner registration |
+| `GET` | `/api/auth/setup-status` | Return registration availability |
+| `POST` | `/api/auth/register` | Register a unique business and its initial role-0 user |
+| `POST` | `/api/auth/setup` | Alias for business registration |
 | `POST` | `/api/auth/verify-email` | Activate the owner account |
 | `POST` | `/api/auth/resend-verification` | Request another verification email |
 | `POST` | `/api/auth/login` | Sign in with password or MPIN |
@@ -155,6 +156,9 @@ All routes except health and authentication require an owner access token in the
 | `/api/reports` | Date-filtered business reports |
 | `/api/settings` | Business, costing, owner, and slaughter settings |
 | `/api/activity` | Paginated and searchable audit history |
+| `/api/admin` | Role-99 approval queue |
+| `/api/employees` | Highest-role employee, role, and invite management |
+| `/api/invites` | Opaque-link status and invited-user registration |
 
 ### Transaction operations
 

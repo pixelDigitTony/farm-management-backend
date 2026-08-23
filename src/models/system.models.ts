@@ -22,10 +22,19 @@ const userSchema = new Schema(
     phoneNormalized: { type: String, required: true, trim: true, select: false },
     passwordHash: { type: String, required: true, select: false },
     mpinHash: { type: String, required: true, select: false },
-    role: { type: String, enum: ["OWNER"], default: "OWNER" },
+    role: { type: Number, min: 0, max: 99, default: 0 },
+    isApproved: { type: Boolean, default: false },
+    approvedAt: { type: Date, default: null },
+    approvedBy: objectId("User"),
     status: {
       type: String,
-      enum: ["PENDING_EMAIL_VERIFICATION", "ACTIVE", "LOCKED", "DISABLED"],
+      enum: [
+        "PENDING_EMAIL_VERIFICATION",
+        "PENDING_ADMIN_APPROVAL",
+        "ACTIVE",
+        "LOCKED",
+        "DISABLED",
+      ],
       default: "PENDING_EMAIL_VERIFICATION",
     },
     isActive: { type: Boolean, default: true },
@@ -50,7 +59,10 @@ const userSchema = new Schema(
 );
 userSchema.index({ emailNormalized: 1 }, { unique: true, sparse: true });
 userSchema.index({ phoneNormalized: 1 }, { unique: true, sparse: true });
-userSchema.index({ role: 1 }, { unique: true });
+userSchema.index(
+  { role: 1 },
+  { unique: true, partialFilterExpression: { role: 99 }, name: "one_super_admin" },
+);
 userSchema.index({ businessId: 1, status: 1 });
 
 const emailVerificationTokenSchema = new Schema(
@@ -115,7 +127,21 @@ authSessionSchema.index({ userId: 1, revokedAt: 1 });
 const businessSchema = new Schema(
   {
     businessName: { type: String, required: true, trim: true },
+    businessNameNormalized: { type: String, required: true, lowercase: true, trim: true },
     ownerUserId: objectId("User"),
+    ownerRole: { type: Number, min: 0, max: 98, default: 0 },
+    roles: {
+      type: [
+        new Schema(
+          {
+            level: { type: Number, min: 0, max: 98, required: true },
+            name: { type: String, required: true, trim: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [{ level: 0, name: "Owner" }],
+    },
     currency: { type: String, enum: ["PHP"], default: "PHP" },
     timezone: { type: String, default: "Asia/Manila" },
     piggery: {
@@ -149,6 +175,21 @@ const businessSchema = new Schema(
   },
   schemaOptions,
 );
+businessSchema.index({ businessNameNormalized: 1 }, { unique: true });
+
+const registrationInviteSchema = new Schema(
+  {
+    businessId: objectId("Business", true),
+    createdBy: objectId("User", true),
+    tokenId: { type: String, required: true, unique: true },
+    role: { type: Number, min: 0, max: 98, required: true },
+    expiresAt: { type: Date, default: null },
+    isActive: { type: Boolean, default: true },
+    registrationCount: { type: Number, default: 0 },
+  },
+  { ...schemaOptions, collection: "registration_invites" },
+);
+registrationInviteSchema.index({ businessId: 1, createdAt: -1 });
 
 const contactSchema = new Schema(
   {
@@ -215,6 +256,7 @@ auditLogSchema.index({ businessId: 1, action: 1, createdAt: -1 });
 auditLogSchema.index({ businessId: 1, outcome: 1, createdAt: -1 });
 
 export const User = createModel("User", userSchema);
+export const RegistrationInvite = createModel("RegistrationInvite", registrationInviteSchema);
 export const EmailVerificationToken = createModel(
   "EmailVerificationToken",
   emailVerificationTokenSchema,

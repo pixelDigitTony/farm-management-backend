@@ -52,8 +52,7 @@ export async function rotateSession(request: Request, response: Response) {
   const user = await User.findOne({
     _id: session.userId,
     isActive: true,
-    status: "ACTIVE",
-    emailVerifiedAt: { $ne: null },
+    status: { $nin: ["LOCKED", "DISABLED"] },
   });
   if (!user) {
     session.revokedAt = new Date();
@@ -93,6 +92,24 @@ export function clearRefreshCookie(response: Response) {
   response.clearCookie(refreshCookieName, clearOptions);
 }
 
-export function publicOwner(user: { id: string; name: string; email: string; phone: string }) {
-  return { id: user.id, name: user.name, email: user.email, phone: user.phone, role: "OWNER" };
+export function publicOwner(user: {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: number;
+  status: string;
+  isApproved: boolean;
+  emailVerifiedAt?: Date | null;
+}) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    role: Number(user.role),
+    status: user.status,
+    isApproved: user.isApproved === true,
+    emailVerified: Boolean(user.emailVerifiedAt),
+  };
 }
