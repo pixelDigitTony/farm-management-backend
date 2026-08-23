@@ -1,7 +1,8 @@
 import { Decimal } from "decimal.js";
 
-export const decimal = (value: Decimal.Value | null | undefined) => new Decimal(value ?? 0);
-export const moneyString = (value: Decimal.Value | null | undefined) =>
-  decimal(value).toDecimalPlaces(2).toFixed(2);
-export const quantityString = (value: Decimal.Value | null | undefined) =>
-  decimal(value).toDecimalPlaces(3).toFixed(3);
+type DecimalInput = Decimal.Value | { toString(): string } | null | undefined;
+
+export const decimal = (value: DecimalInput) =>
+  new Decimal(value !== null && typeof value === "object" ? value.toString() : (value ?? 0));
+export const moneyString = (value: DecimalInput) => decimal(value).toDecimalPlaces(2).toFixed(2);
+export const quantityString = (value: DecimalInput) => decimal(value).toDecimalPlaces(3).toFixed(3);

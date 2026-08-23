@@ -4,6 +4,7 @@ import { getOwner } from "../middleware/auth.js";
 import {
   deletePigAcquisition,
   deleteSlaughterRecord,
+  getInventoryReceipt,
   postCookingBatch,
   postFeedUsage,
   postInventoryReceipt,
@@ -12,6 +13,7 @@ import {
   postPiggerySale,
   postPigMeasurement,
   postSlaughterRecord,
+  updateInventoryReceipt,
   updatePigAcquisitionCost,
   updateSlaughterRecord,
 } from "../services/farm-operations.service.js";
@@ -101,6 +103,18 @@ operationRouter.post("/inventory-receipts", async (request, response) =>
         parse(inventoryReceiptOperationSchema, request.body),
       ),
     ),
+);
+operationRouter.get("/inventory-receipts/:id", async (request, response) =>
+  response.json(await getInventoryReceipt(getOwner(request).businessId, request.params.id)),
+);
+operationRouter.patch("/inventory-receipts/:id", async (request, response) =>
+  response.json(
+    await updateInventoryReceipt(
+      getOwner(request).businessId,
+      request.params.id,
+      parse(inventoryReceiptOperationSchema, request.body),
+    ),
+  ),
 );
 operationRouter.post("/feed-usage", async (request, response) =>
   response

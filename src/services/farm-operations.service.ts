@@ -34,6 +34,7 @@ import {
   postCash,
   postExpense,
   reverseExpenseCashWithoutExpense,
+  updateExpense,
 } from "./posting.service.js";
 
 type InventoryReceiptInput = InferOutput<typeof inventoryReceiptOperationSchema>;
@@ -45,6 +46,33 @@ type PigAcquisitionInput = InferOutput<typeof pigAcquisitionOperationSchema>;
 type PigAcquisitionCostUpdateInput = InferOutput<typeof pigAcquisitionCostUpdateSchema>;
 type PiggerySaleInput = InferOutput<typeof piggerySaleOperationSchema>;
 type CookingBatchInput = InferOutput<typeof cookingBatchOperationSchema>;
+
+export function calculateReceiptCorrection(
+  oldInitialValue: Parameters<typeof decimal>[0],
+  oldRemainingValue: Parameters<typeof decimal>[0],
+  newQuantityValue: Parameters<typeof decimal>[0],
+  itemChanged: boolean,
+) {
+  const oldInitial = decimal(oldInitialValue);
+  const oldRemaining = decimal(oldRemainingValue);
+  const consumed = oldInitial.minus(oldRemaining);
+  const newQuantity = decimal(newQuantityValue);
+  if (newQuantity.lessThan(consumed))
+    throw new HttpError(
+      422,
+      `Quantity cannot be less than ${consumed.toString()} because that stock has already been used`,
+    );
+  if (itemChanged && !consumed.isZero())
+    throw new HttpError(
+      422,
+      "The inventory item cannot be changed after stock from this lot was used",
+    );
+  return {
+    consumed,
+    newRemaining: newQuantity.minus(consumed),
+    stockDelta: newQuantity.minus(oldInitial),
+  };
+}
 
 const reference = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
@@ -139,6 +167,156 @@ export async function postInventoryReceipt(
     ]);
     throw error;
   }
+}
+
+export async function getInventoryReceipt(businessId: Types.ObjectId, lotId: string) {
+  const lot = await InventoryLot.findOne({
+    _id: lotId,
+    businessId,
+    sourceType: "PURCHASE",
+    status: { $ne: "VOIDED" },
+  });
+  if (!lot) throw new HttpError(404, "Inventory receipt was not found");
+  const movement = await InventoryMovement.findOne({
+    businessId,
+    movementType: "RECEIPT",
+    toLotId: lot._id,
+    status: "POSTED",
+  });
+  if (!movement?.source?.documentId)
+    throw new HttpError(409, "This stock lot is not linked to an editable receipt");
+  const expense = await Expense.findOne({
+    _id: movement.source.documentId,
+    businessId,
+    status: "POSTED",
+  });
+  if (!expense) throw new HttpError(409, "The receipt expense could not be found");
+  return {
+    lotId: lot.id,
+    movementId: movement.id,
+    movementDate: movement.movementDate,
+    itemId: String(lot.itemId),
+    quantity: lot.initialQuantity,
+    unitCost: lot.unitCost,
+    businessUnit: lot.businessUnit,
+    storageLocation: lot.storageLocation ?? "",
+    expiryDate: lot.expiryDate ?? null,
+    amountPaid: expense.amountPaidCached,
+    accountId: expense.paymentAccountIdCached ? String(expense.paymentAccountIdCached) : "",
+    notes: movement.reason ?? "",
+  };
+}
+
+export async function updateInventoryReceipt(
+  businessId: Types.ObjectId,
+  lotId: string,
+  input: InventoryReceiptInput,
+) {
+  const lot = await InventoryLot.findOne({
+    _id: lotId,
+    businessId,
+    sourceType: "PURCHASE",
+    status: { $ne: "VOIDED" },
+  });
+  if (!lot) throw new HttpError(404, "Inventory receipt was not found");
+  const movement = await InventoryMovement.findOne({
+    businessId,
+    movementType: "RECEIPT",
+    toLotId: lot._id,
+    status: "POSTED",
+  });
+  if (!movement?.source?.documentId)
+    throw new HttpError(409, "This stock lot is not linked to an editable receipt");
+  const expense = await Expense.findOne({
+    _id: movement.source.documentId,
+    businessId,
+    status: "POSTED",
+  });
+  if (!expense) throw new HttpError(409, "The receipt expense could not be found");
+
+  const oldItemId = String(lot.itemId);
+  const newQuantity = decimal(input.quantity);
+  const oldRemaining = decimal(lot.remainingQuantityCached);
+  const correction = calculateReceiptCorrection(
+    lot.initialQuantity,
+    lot.remainingQuantityCached,
+    input.quantity,
+    input.itemId !== oldItemId,
+  );
+
+  const item = await InventoryItem.findOne({ _id: input.itemId, businessId, isActive: true });
+  if (!item) throw new HttpError(404, "Inventory item was not found");
+  await requireCashAccount(businessId, input.accountId, input.amountPaid);
+  const totalCost = newQuantity.times(input.unitCost);
+  if (decimal(input.amountPaid).greaterThan(totalCost))
+    throw new HttpError(422, "Amount paid cannot exceed the receipt total");
+
+  const description = `Inventory purchase: ${item.name}`;
+  await updateExpense(businessId, expense.id, {
+    expenseNumber: expense.expenseNumber,
+    expenseDate: input.movementDate,
+    businessUnit: input.businessUnit,
+    category:
+      item.category === "FEED"
+        ? "FEED"
+        : item.category === "INGREDIENT" || item.category === "MEAT"
+          ? "INGREDIENT"
+          : "SUPPLY",
+    description,
+    totalAmount: Number(totalCost.toString()),
+    amountPaid: input.amountPaid,
+    accountId: input.accountId,
+  });
+
+  const newRemaining = correction.newRemaining;
+  if (input.itemId === oldItemId) {
+    await InventoryItem.updateOne(
+      { _id: lot.itemId, businessId },
+      {
+        $inc: { currentStockCached: correction.stockDelta.toString() },
+        $set: { defaultExternalPricePerUnit: input.unitCost },
+      },
+    );
+  } else {
+    await Promise.all([
+      InventoryItem.updateOne(
+        { _id: lot.itemId, businessId },
+        { $inc: { currentStockCached: oldRemaining.negated().toString() } },
+      ),
+      InventoryItem.updateOne(
+        { _id: item._id, businessId },
+        {
+          $inc: { currentStockCached: newRemaining.toString() },
+          $set: { defaultExternalPricePerUnit: input.unitCost },
+        },
+      ),
+    ]);
+  }
+
+  lot.set({
+    itemId: item._id,
+    businessUnit: input.businessUnit,
+    storageLocation: input.storageLocation,
+    receivedDate: input.movementDate,
+    expiryDate: input.expiryDate,
+    initialQuantity: input.quantity,
+    remainingQuantityCached: newRemaining.toString(),
+    unitCost: input.unitCost,
+    totalCost: totalCost.toString(),
+    status: newRemaining.isZero() ? "DEPLETED" : "ACTIVE",
+  });
+  movement.set({
+    movementDate: input.movementDate,
+    itemId: item._id,
+    toBusinessUnit: input.businessUnit,
+    quantity: input.quantity,
+    unit: item.baseUnit,
+    unitCostSnapshot: input.unitCost,
+    totalCost: totalCost.toString(),
+    reason: input.notes || `Inventory receipt for ${item.name}`,
+  });
+  await Promise.all([lot.save(), movement.save()]);
+  return { item, lot, movement, expense: await Expense.findById(expense._id) };
 }
 
 export async function postFeedUsage(businessId: Types.ObjectId, input: FeedUsageInput) {
