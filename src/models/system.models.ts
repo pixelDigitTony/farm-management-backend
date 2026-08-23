@@ -50,7 +50,11 @@ const emailVerificationTokenSchema = new Schema(
     userId: objectId("User", true),
     emailNormalized: { type: String, required: true, lowercase: true, trim: true },
     tokenHash: { type: String, required: true, unique: true, select: false },
-    purpose: { type: String, enum: ["VERIFY_EMAIL"], default: "VERIFY_EMAIL" },
+    purpose: {
+      type: String,
+      enum: ["VERIFY_EMAIL", "RESET_PASSWORD", "RESET_MPIN"],
+      default: "VERIFY_EMAIL",
+    },
     expiresAt: { type: Date, required: true },
     usedAt: { type: Date, default: null },
     invalidatedAt: { type: Date, default: null },

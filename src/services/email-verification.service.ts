@@ -18,7 +18,10 @@ export async function issueVerificationEmail(
 ) {
   const now = new Date();
   if (options.enforceRateLimit !== false) {
-    const latest = await EmailVerificationToken.findOne({ userId: user._id })
+    const latest = await EmailVerificationToken.findOne({
+      userId: user._id,
+      purpose: "VERIFY_EMAIL",
+    })
       .sort({ createdAt: -1 })
       .lean();
     if (
@@ -35,6 +38,7 @@ export async function issueVerificationEmail(
     }
     const sentLastHour = await EmailVerificationToken.countDocuments({
       userId: user._id,
+      purpose: "VERIFY_EMAIL",
       createdAt: { $gte: new Date(now.getTime() - 3_600_000) },
     });
     if (sentLastHour >= env.EMAIL_MAX_RESENDS_PER_HOUR) {
@@ -48,7 +52,7 @@ export async function issueVerificationEmail(
   }
 
   await EmailVerificationToken.updateMany(
-    { userId: user._id, usedAt: null, invalidatedAt: null },
+    { userId: user._id, purpose: "VERIFY_EMAIL", usedAt: null, invalidatedAt: null },
     { $set: { invalidatedAt: now } },
   );
   const rawToken = createOpaqueToken();

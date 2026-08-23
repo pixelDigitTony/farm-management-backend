@@ -87,6 +87,7 @@ Expected response:
 | `RESEND_EMAIL_FROM` | Sender address on a verified Resend domain | empty |
 | `RESEND_EMAIL_FROM_NAME` | Sender display name | `Miss V Business` |
 | `EMAIL_VERIFICATION_TTL_MINUTES` | Email-verification link lifetime | `1440` |
+| `CREDENTIAL_RESET_TTL_MINUTES` | Password and MPIN reset-link lifetime | `60` |
 | `EMAIL_RESEND_COOLDOWN_SECONDS` | Minimum delay between resend requests | `60` |
 | `EMAIL_MAX_RESENDS_PER_HOUR` | Maximum verification resends per hour | `5` |
 | `ACCESS_TOKEN_TTL_MINUTES` | Access-token lifetime | `15` |

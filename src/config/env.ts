@@ -18,6 +18,7 @@ const envSchema = v.object({
   RESEND_EMAIL_FROM: v.optional(v.pipe(v.string(), v.email())),
   RESEND_EMAIL_FROM_NAME: v.optional(v.string(), "Miss V Business"),
   EMAIL_VERIFICATION_TTL_MINUTES: positiveInteger(1440),
+  CREDENTIAL_RESET_TTL_MINUTES: positiveInteger(60),
   EMAIL_RESEND_COOLDOWN_SECONDS: v.optional(
     v.pipe(v.unknown(), v.toNumber(), v.number(), v.integer(), v.minValue(0)),
     60,

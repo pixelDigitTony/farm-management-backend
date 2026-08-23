@@ -11,6 +11,7 @@ import {
 } from "../middleware/rate-limit.js";
 import {
   AuditLog,
+  AuthSession,
   Business,
   CashAccount,
   EmailVerificationToken,
@@ -23,9 +24,12 @@ import {
   revokeSession,
   rotateSession,
 } from "../services/auth-session.service.js";
+import { issueCredentialRecovery } from "../services/credential-recovery.service.js";
 import { issueVerificationEmail } from "../services/email-verification.service.js";
 import {
+  credentialResetSchema,
   loginSchema,
+  recoveryRequestSchema,
   registrationSchema,
   resendVerificationSchema,
   verifyEmailSchema,
@@ -182,6 +186,116 @@ authRouter.post("/resend-verification", verificationLimiter, async (request, res
   if (!owner || owner.emailVerifiedAt) return response.json({ message: genericMessage });
   await issueVerificationEmail(owner);
   response.json({ message: genericMessage });
+});
+
+const recoveryMessage =
+  "If the account information matches, a credential reset link has been sent to the verified email address.";
+
+authRouter.post("/recovery/request", verificationLimiter, async (request, response) => {
+  const input = parse(recoveryRequestSchema, request.body);
+  let owner: InstanceType<typeof User> | null = null;
+  if (input.kind === "PASSWORD") {
+    owner = await User.findOne({
+      emailNormalized: normalizeEmail(input.email),
+      isActive: true,
+      status: "ACTIVE",
+      emailVerifiedAt: { $ne: null },
+    }).select("+emailNormalized");
+  } else {
+    let phoneNormalized = "invalid";
+    try {
+      phoneNormalized = normalizePhilippinePhone(input.phone);
+    } catch {
+      // Keep the response generic so recovery cannot be used to discover accounts.
+    }
+    owner = await User.findOne({
+      phoneNormalized,
+      isActive: true,
+      status: "ACTIVE",
+      emailVerifiedAt: { $ne: null },
+    }).select("+emailNormalized");
+  }
+  if (owner) await issueCredentialRecovery(owner, input.kind);
+  response.json({ message: recoveryMessage });
+});
+
+authRouter.post("/recovery/reset", verificationLimiter, async (request, response) => {
+  const input = parse(credentialResetSchema, request.body);
+  const now = new Date();
+  const purpose = input.kind === "PASSWORD" ? "RESET_PASSWORD" : "RESET_MPIN";
+  const tokenRecord = await EmailVerificationToken.findOneAndUpdate(
+    {
+      tokenHash: hashOpaqueToken(input.token),
+      purpose,
+      usedAt: null,
+      invalidatedAt: null,
+      expiresAt: { $gt: now },
+    },
+    { $set: { usedAt: now } },
+    { new: true },
+  );
+  if (!tokenRecord)
+    throw new HttpError(
+      400,
+      "This reset link is invalid or expired",
+      undefined,
+      "INVALID_RESET_TOKEN",
+    );
+  const owner = await User.findOne({
+    _id: tokenRecord.userId,
+    isActive: true,
+    status: "ACTIVE",
+  }).select("+emailNormalized +passwordHash +mpinHash");
+  if (!owner || owner.emailNormalized !== tokenRecord.emailNormalized)
+    throw new HttpError(
+      400,
+      "This reset link is invalid or expired",
+      undefined,
+      "INVALID_RESET_TOKEN",
+    );
+
+  const hash = await bcrypt.hash(input.credential, 12);
+  if (input.kind === "PASSWORD") {
+    owner.passwordHash = hash;
+    owner.passwordSecurity.failedAttempts = 0;
+    owner.passwordSecurity.lockedUntil = null;
+    owner.passwordSecurity.passwordChangedAt = now;
+  } else {
+    owner.mpinHash = hash;
+    owner.mpinSecurity.failedAttempts = 0;
+    owner.mpinSecurity.lockedUntil = null;
+    owner.mpinSecurity.mpinChangedAt = now;
+  }
+  await owner.save();
+  await Promise.all([
+    EmailVerificationToken.updateMany(
+      { userId: owner._id, purpose, usedAt: null, invalidatedAt: null },
+      { $set: { invalidatedAt: now } },
+    ),
+    AuthSession.updateMany(
+      { userId: owner._id, revokedAt: null },
+      {
+        $set: {
+          revokedAt: now,
+          revokeReason: input.kind === "PASSWORD" ? "PASSWORD_CHANGED" : "MPIN_CHANGED",
+        },
+      },
+    ),
+    AuditLog.create({
+      businessId: owner.businessId,
+      userId: owner._id,
+      action: "UPDATE",
+      targetCollection: "users",
+      targetDocumentId: owner._id,
+      changedFields: [input.kind === "PASSWORD" ? "password" : "mpin"],
+      reason: "CREDENTIAL_RECOVERY",
+      ipAddress: request.ip,
+      userAgent: request.get("user-agent"),
+    }),
+  ]);
+  response.json({
+    message: `${input.kind === "PASSWORD" ? "Password" : "MPIN"} reset successfully. Sign in again on all devices.`,
+  });
 });
 
 authRouter.post("/login", loginLimiter, async (request, response) => {

@@ -14,6 +14,14 @@ type VerificationEmail = {
   expiresAt: Date;
 };
 
+type CredentialResetEmail = {
+  recipientName: string;
+  recipientEmail: string;
+  resetUrl: string;
+  expiresAt: Date;
+  credentialLabel: "password" | "MPIN";
+};
+
 const escapeHtml = (value: string) =>
   value.replace(/[&<>'"]/g, (character) => {
     const entities: Record<string, string> = {
@@ -44,11 +52,34 @@ class ResendEmailService {
     }
     return { provider: "RESEND", status: "SENT", messageId: data?.id ?? null };
   }
+
+  async sendCredentialResetEmail(input: CredentialResetEmail): Promise<EmailDeliveryResult> {
+    const { data, error } = await this.client.emails.send({
+      to: input.recipientEmail,
+      from: `${env.RESEND_EMAIL_FROM_NAME} <${env.RESEND_EMAIL_FROM}>`,
+      subject: `Reset your Miss V Business ${input.credentialLabel}`,
+      html: credentialResetHtml(input),
+      text: credentialResetText(input),
+    });
+    if (error) {
+      const deliveryError = new Error(error.message);
+      deliveryError.name = error.name ?? "RESEND_ERROR";
+      throw deliveryError;
+    }
+    return { provider: "RESEND", status: "SENT", messageId: data?.id ?? null };
+  }
 }
 
 class ConsoleEmailService {
   async sendVerificationEmail(input: VerificationEmail): Promise<EmailDeliveryResult> {
     console.info(`[development email] Verify ${input.recipientEmail}: ${input.verificationUrl}`);
+    return { provider: "CONSOLE", status: "SENT", messageId: null };
+  }
+
+  async sendCredentialResetEmail(input: CredentialResetEmail): Promise<EmailDeliveryResult> {
+    console.info(
+      `[development email] Reset ${input.credentialLabel} for ${input.recipientEmail}: ${input.resetUrl}`,
+    );
     return { provider: "CONSOLE", status: "SENT", messageId: null };
   }
 }
@@ -61,6 +92,17 @@ function verificationHtml(input: VerificationEmail) {
 
 function verificationText(input: VerificationEmail) {
   return `Hello ${input.recipientName},\n\nVerify your Miss V Business email: ${input.verificationUrl}\n\nThis link expires ${input.expiresAt.toISOString()}. If you did not register, ignore this message.`;
+}
+
+function credentialResetHtml(input: CredentialResetEmail) {
+  const name = escapeHtml(input.recipientName);
+  const url = escapeHtml(input.resetUrl);
+  const label = escapeHtml(input.credentialLabel);
+  return `<!doctype html><html><body style="margin:0;background:#f7f6f1;font-family:Arial,sans-serif;color:#292524"><div style="max-width:560px;margin:40px auto;background:#fff;border:1px solid #e7e5e4;border-radius:20px;padding:36px"><div style="color:#166534;font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase">Miss V Business</div><h1 style="font-size:28px;margin:16px 0 8px">Reset your ${label}</h1><p style="color:#57534e;line-height:1.6">Hello ${name}, use the secure link below to choose a new ${label}.</p><a href="${url}" style="display:inline-block;margin:20px 0;padding:14px 22px;background:#183b2b;color:#fff;text-decoration:none;border-radius:12px;font-weight:700">Reset ${label}</a><p style="font-size:13px;color:#78716c;line-height:1.5">This link expires ${escapeHtml(input.expiresAt.toLocaleString("en-PH", { timeZone: "Asia/Manila" }))}. If you did not request this reset, ignore this message.</p></div></body></html>`;
+}
+
+function credentialResetText(input: CredentialResetEmail) {
+  return `Hello ${input.recipientName},\n\nReset your Miss V Business ${input.credentialLabel}: ${input.resetUrl}\n\nThis link expires ${input.expiresAt.toISOString()}. If you did not request this reset, ignore this message.`;
 }
 
 export const emailService =

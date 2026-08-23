@@ -40,3 +40,21 @@ export const verifyEmailSchema = v.object({
 export const resendVerificationSchema = v.object({
   email: v.pipe(v.string(), v.email()),
 });
+
+export const recoveryRequestSchema = v.variant("kind", [
+  v.object({ kind: v.literal("PASSWORD"), email: v.pipe(v.string(), v.email()) }),
+  v.object({ kind: v.literal("MPIN"), phone: trimmedString(10, 30) }),
+]);
+
+export const credentialResetSchema = v.variant("kind", [
+  v.object({
+    kind: v.literal("PASSWORD"),
+    token: verifyEmailSchema.entries.token,
+    credential: v.pipe(v.string(), v.minLength(8), v.maxLength(100)),
+  }),
+  v.object({
+    kind: v.literal("MPIN"),
+    token: verifyEmailSchema.entries.token,
+    credential: mpinSchema,
+  }),
+]);
