@@ -146,8 +146,11 @@ authRouter.post("/verify-email", verificationLimiter, async (request, response) 
       "INVALID_VERIFICATION_TOKEN",
     );
   }
-  const owner = await User.findById(tokenRecord.userId).select("+emailNormalized");
-  if (!owner || owner.emailNormalized !== tokenRecord.emailNormalized) {
+  const owner = await User.findById(tokenRecord.userId).select(
+    "+emailNormalized +pendingEmail +pendingEmailNormalized",
+  );
+  const verifiesPendingEmail = owner?.pendingEmailNormalized === tokenRecord.emailNormalized;
+  if (!owner || (owner.emailNormalized !== tokenRecord.emailNormalized && !verifiesPendingEmail)) {
     throw new HttpError(
       400,
       "This verification link is invalid or expired",
@@ -155,12 +158,18 @@ authRouter.post("/verify-email", verificationLimiter, async (request, response) 
       "INVALID_VERIFICATION_TOKEN",
     );
   }
+  if (verifiesPendingEmail && owner.pendingEmail) {
+    owner.email = owner.pendingEmail;
+    owner.emailNormalized = owner.pendingEmailNormalized;
+    owner.pendingEmail = null;
+    owner.pendingEmailNormalized = null;
+  }
   owner.emailVerifiedAt = now;
   owner.status = "ACTIVE";
   await owner.save();
   await Promise.all([
     EmailVerificationToken.updateMany(
-      { userId: owner._id, usedAt: null, invalidatedAt: null },
+      { userId: owner._id, purpose: "VERIFY_EMAIL", usedAt: null, invalidatedAt: null },
       { $set: { invalidatedAt: now } },
     ),
     AuditLog.create({

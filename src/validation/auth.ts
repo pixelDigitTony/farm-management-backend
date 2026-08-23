@@ -58,3 +58,23 @@ export const credentialResetSchema = v.variant("kind", [
     credential: mpinSchema,
   }),
 ]);
+
+export const passwordChangeSchema = v.object({
+  currentPassword: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
+  newPassword: v.pipe(v.string(), v.minLength(8), v.maxLength(100)),
+});
+
+export const mpinChangeSchema = v.object({
+  currentMpin: v.pipe(v.string(), v.regex(/^\d{6}$/)),
+  newMpin: mpinSchema,
+});
+
+export const emailChangeSchema = v.object({
+  currentPassword: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
+  newEmail: v.pipe(v.string(), v.email()),
+});
+
+export const phoneChangeSchema = v.object({
+  currentPassword: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
+  newPhone: trimmedString(10, 30),
+});
