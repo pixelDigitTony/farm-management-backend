@@ -1,4 +1,5 @@
 import { decimal, moneyString, quantityString } from "../lib/decimal.js";
+import { HttpError } from "../lib/http-error.js";
 
 export type SlaughterQuoteInput = {
   raisingCost: number;
@@ -30,10 +31,14 @@ export function calculateSlaughter(input: SlaughterQuoteInput) {
     decimal(0),
   );
   const accounted = usableWeight.plus(wasteWeight);
+  if (decimal(input.carcassWeightKg).greaterThan(input.liveWeightKg))
+    throw new HttpError(422, "Whole carcass weight cannot exceed live weight");
+  if (accounted.greaterThan(input.carcassWeightKg))
+    throw new HttpError(422, "Meat part and waste weights cannot exceed whole carcass weight");
   return {
     usableWeightKg: quantityString(usableWeight),
     wasteWeightKg: quantityString(wasteWeight),
-    unaccountedWeightKg: quantityString(decimal(input.liveWeightKg).minus(accounted)),
+    unaccountedWeightKg: quantityString(decimal(input.carcassWeightKg).minus(accounted)),
     slaughterCost: moneyString(slaughterCost),
     totalCost: moneyString(totalCost),
     costPerUsableKg: moneyString(costPerUsableKg),

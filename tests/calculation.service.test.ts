@@ -20,6 +20,32 @@ describe("business calculations", () => {
     expect(result.totalCost).toBe("13000.00");
     expect(result.costPerUsableKg).toBe("216.67");
     expect(result.usableYieldPercentage).toBe("60.000");
+    expect(result.unaccountedWeightKg).toBe("5.000");
+  });
+
+  it("rejects impossible slaughter weights", () => {
+    expect(() =>
+      calculateSlaughter({
+        raisingCost: 12000,
+        liveWeightKg: 100,
+        carcassWeightKg: 105,
+        costs: [],
+        parts: [{ name: "Meat", classification: "MEAT", weightKg: 60 }],
+      }),
+    ).toThrow("Whole carcass weight cannot exceed live weight");
+
+    expect(() =>
+      calculateSlaughter({
+        raisingCost: 12000,
+        liveWeightKg: 100,
+        carcassWeightKg: 75,
+        costs: [],
+        parts: [
+          { name: "Meat", classification: "MEAT", weightKg: 70 },
+          { name: "Waste", classification: "WASTE", weightKg: 10 },
+        ],
+      }),
+    ).toThrow("Meat part and waste weights cannot exceed whole carcass weight");
   });
 
   it("suggests a menu price from food cost target", () => {

@@ -47,6 +47,47 @@ type PigAcquisitionCostUpdateInput = InferOutput<typeof pigAcquisitionCostUpdate
 type PiggerySaleInput = InferOutput<typeof piggerySaleOperationSchema>;
 type CookingBatchInput = InferOutput<typeof cookingBatchOperationSchema>;
 
+export function calculateInventoryReceipt(input: {
+  quantity?: number;
+  unitCost?: number;
+  purchaseQuantity?: number;
+  measurementPerPurchaseUnit?: number;
+  totalPurchaseCost?: number;
+}) {
+  const usesSeparatedInputs =
+    input.purchaseQuantity !== undefined ||
+    input.measurementPerPurchaseUnit !== undefined ||
+    input.totalPurchaseCost !== undefined;
+  if (
+    usesSeparatedInputs &&
+    (input.purchaseQuantity === undefined ||
+      input.measurementPerPurchaseUnit === undefined ||
+      input.totalPurchaseCost === undefined)
+  )
+    throw new HttpError(
+      422,
+      "Enter the purchased quantity, measurement per purchased unit, and total purchase cost",
+    );
+  if (!usesSeparatedInputs && (input.quantity === undefined || input.unitCost === undefined))
+    throw new HttpError(422, "Enter the receipt quantity and unit cost");
+
+  const purchaseQuantity = decimal(input.purchaseQuantity ?? input.quantity ?? 0);
+  const measurementPerPurchaseUnit = decimal(input.measurementPerPurchaseUnit ?? 1);
+  const baseQuantity = purchaseQuantity.times(measurementPerPurchaseUnit);
+  const totalCost = usesSeparatedInputs
+    ? decimal(input.totalPurchaseCost ?? 0)
+    : purchaseQuantity.times(input.unitCost ?? 0);
+  const baseUnitCost = totalCost.dividedBy(baseQuantity);
+  return {
+    usesSeparatedInputs,
+    purchaseQuantity,
+    measurementPerPurchaseUnit,
+    baseQuantity,
+    baseUnitCost,
+    totalCost,
+  };
+}
+
 export function calculateReceiptCorrection(
   oldInitialValue: Parameters<typeof decimal>[0],
   oldRemainingValue: Parameters<typeof decimal>[0],
@@ -94,7 +135,8 @@ export async function postInventoryReceipt(
   const item = await InventoryItem.findOne({ _id: input.itemId, businessId, isActive: true });
   if (!item) throw new HttpError(404, "Inventory item was not found");
   await requireCashAccount(businessId, input.accountId, input.amountPaid);
-  const totalCost = decimal(input.quantity).times(input.unitCost);
+  const receipt = calculateInventoryReceipt(input);
+  const { baseQuantity, baseUnitCost, totalCost } = receipt;
   if (decimal(input.amountPaid).greaterThan(totalCost))
     throw new HttpError(422, "Amount paid cannot exceed the receipt total");
 
@@ -107,9 +149,14 @@ export async function postInventoryReceipt(
     storageLocation: input.storageLocation,
     receivedDate: input.movementDate,
     expiryDate: input.expiryDate,
-    initialQuantity: input.quantity,
-    remainingQuantityCached: input.quantity,
-    unitCost: input.unitCost,
+    purchaseQuantity: receipt.purchaseQuantity.toString(),
+    purchaseUnit: receipt.usesSeparatedInputs
+      ? (item.purchaseUnit ?? item.baseUnit)
+      : item.baseUnit,
+    purchaseUnitToBaseUnit: receipt.measurementPerPurchaseUnit.toString(),
+    initialQuantity: baseQuantity.toString(),
+    remainingQuantityCached: baseQuantity.toString(),
+    unitCost: baseUnitCost.toString(),
     totalCost: totalCost.toString(),
   });
   const movement = await InventoryMovement.create({
@@ -120,9 +167,9 @@ export async function postInventoryReceipt(
     itemId: item._id,
     toBusinessUnit: input.businessUnit,
     toLotId: lot._id,
-    quantity: input.quantity,
+    quantity: baseQuantity.toString(),
     unit: item.baseUnit,
-    unitCostSnapshot: input.unitCost,
+    unitCostSnapshot: baseUnitCost.toString(),
     totalCost: totalCost.toString(),
     reason: input.notes || `Inventory receipt for ${item.name}`,
   });
@@ -131,8 +178,8 @@ export async function postInventoryReceipt(
     await InventoryItem.updateOne(
       { _id: item._id, businessId },
       {
-        $inc: { currentStockCached: input.quantity },
-        $set: { defaultExternalPricePerUnit: input.unitCost },
+        $inc: { currentStockCached: baseQuantity.toString() },
+        $set: { defaultExternalPricePerUnit: baseUnitCost.toString() },
       },
     );
     const expense = await postExpense(businessId, {
@@ -160,7 +207,7 @@ export async function postInventoryReceipt(
     await Promise.all([
       InventoryItem.updateOne(
         { _id: item._id, businessId },
-        { $inc: { currentStockCached: -input.quantity } },
+        { $inc: { currentStockCached: baseQuantity.negated().toString() } },
       ),
       InventoryMovement.deleteOne({ _id: movement._id }),
       InventoryLot.deleteOne({ _id: lot._id }),
@@ -198,6 +245,10 @@ export async function getInventoryReceipt(businessId: Types.ObjectId, lotId: str
     itemId: String(lot.itemId),
     quantity: lot.initialQuantity,
     unitCost: lot.unitCost,
+    purchaseQuantity: lot.purchaseQuantity ?? lot.initialQuantity,
+    purchaseUnit: lot.purchaseUnit ?? movement.unit,
+    measurementPerPurchaseUnit: lot.purchaseUnitToBaseUnit ?? 1,
+    totalPurchaseCost: lot.totalCost,
     businessUnit: lot.businessUnit,
     storageLocation: lot.storageLocation ?? "",
     expiryDate: lot.expiryDate ?? null,
@@ -235,19 +286,20 @@ export async function updateInventoryReceipt(
   if (!expense) throw new HttpError(409, "The receipt expense could not be found");
 
   const oldItemId = String(lot.itemId);
-  const newQuantity = decimal(input.quantity);
+  const receipt = calculateInventoryReceipt(input);
+  const newQuantity = receipt.baseQuantity;
   const oldRemaining = decimal(lot.remainingQuantityCached);
   const correction = calculateReceiptCorrection(
     lot.initialQuantity,
     lot.remainingQuantityCached,
-    input.quantity,
+    newQuantity,
     input.itemId !== oldItemId,
   );
 
   const item = await InventoryItem.findOne({ _id: input.itemId, businessId, isActive: true });
   if (!item) throw new HttpError(404, "Inventory item was not found");
   await requireCashAccount(businessId, input.accountId, input.amountPaid);
-  const totalCost = newQuantity.times(input.unitCost);
+  const { baseUnitCost, totalCost } = receipt;
   if (decimal(input.amountPaid).greaterThan(totalCost))
     throw new HttpError(422, "Amount paid cannot exceed the receipt total");
 
@@ -274,7 +326,7 @@ export async function updateInventoryReceipt(
       { _id: lot.itemId, businessId },
       {
         $inc: { currentStockCached: correction.stockDelta.toString() },
-        $set: { defaultExternalPricePerUnit: input.unitCost },
+        $set: { defaultExternalPricePerUnit: baseUnitCost.toString() },
       },
     );
   } else {
@@ -287,7 +339,7 @@ export async function updateInventoryReceipt(
         { _id: item._id, businessId },
         {
           $inc: { currentStockCached: newRemaining.toString() },
-          $set: { defaultExternalPricePerUnit: input.unitCost },
+          $set: { defaultExternalPricePerUnit: baseUnitCost.toString() },
         },
       ),
     ]);
@@ -299,9 +351,14 @@ export async function updateInventoryReceipt(
     storageLocation: input.storageLocation,
     receivedDate: input.movementDate,
     expiryDate: input.expiryDate,
-    initialQuantity: input.quantity,
+    purchaseQuantity: receipt.purchaseQuantity.toString(),
+    purchaseUnit: receipt.usesSeparatedInputs
+      ? (item.purchaseUnit ?? item.baseUnit)
+      : item.baseUnit,
+    purchaseUnitToBaseUnit: receipt.measurementPerPurchaseUnit.toString(),
+    initialQuantity: newQuantity.toString(),
     remainingQuantityCached: newRemaining.toString(),
-    unitCost: input.unitCost,
+    unitCost: baseUnitCost.toString(),
     totalCost: totalCost.toString(),
     status: newRemaining.isZero() ? "DEPLETED" : "ACTIVE",
   });
@@ -309,9 +366,9 @@ export async function updateInventoryReceipt(
     movementDate: input.movementDate,
     itemId: item._id,
     toBusinessUnit: input.businessUnit,
-    quantity: input.quantity,
+    quantity: newQuantity.toString(),
     unit: item.baseUnit,
-    unitCostSnapshot: input.unitCost,
+    unitCostSnapshot: baseUnitCost.toString(),
     totalCost: totalCost.toString(),
     reason: input.notes || `Inventory receipt for ${item.name}`,
   });
@@ -376,6 +433,7 @@ export async function postFeedUsage(businessId: Types.ObjectId, input: FeedUsage
     batchId: input.batchId,
     headCount: affectedPigIds.length || undefined,
     quantityUsed: input.quantityUsed,
+    unit: item.baseUnit,
     unitCostSnapshot: unitCost.toString(),
     totalFeedCost: totalFeedCost.toString(),
     costPerPig: affectedPigIds.length ? costPerPig.toString() : null,

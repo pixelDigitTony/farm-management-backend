@@ -76,8 +76,13 @@ export const karenderiyaSaleUpdateSchema = v.object({
 export const inventoryReceiptOperationSchema = v.object({
   movementDate: coercedDate,
   itemId: v.string(),
-  quantity: coercedNumber(0, false),
-  unitCost: amount,
+  // Legacy callers may still send quantity/unitCost as base-unit values. New
+  // callers separate purchased-unit count from the measurement of each unit.
+  quantity: v.optional(coercedNumber(0, false)),
+  unitCost: v.optional(amount),
+  purchaseQuantity: v.optional(coercedNumber(0, false)),
+  measurementPerPurchaseUnit: v.optional(coercedNumber(0, false)),
+  totalPurchaseCost: v.optional(amount),
   businessUnit: v.picklist(["PIGGERY", "KARENDERIYA"]),
   storageLocation: v.optional(v.string()),
   expiryDate: v.optional(coercedDate),

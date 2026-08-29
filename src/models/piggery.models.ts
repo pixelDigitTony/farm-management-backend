@@ -85,7 +85,7 @@ const feedUsageSchema = new Schema(
     batchId: objectId("PigBatch"),
     headCount: Number,
     quantityUsed: { ...money, required: true },
-    unit: { type: String, enum: ["KG"], default: "KG" },
+    unit: { type: String, default: "KG" },
     unitCostSnapshot: money,
     totalFeedCost: money,
     costPerPig: optionalMoney,
