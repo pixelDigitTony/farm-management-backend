@@ -15,6 +15,14 @@ export const authLimiter = rateLimit({
   handler: jsonHandler,
 });
 
+export const publicContentLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 300,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: jsonHandler,
+});
+
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60_000,
   limit: 20,

@@ -63,6 +63,23 @@ export function requireSuperAdmin(request: Request, _response: Response, next: N
   next();
 }
 
+export async function requireHighestBusinessRole(
+  request: Request,
+  _response: Response,
+  next: NextFunction,
+) {
+  try {
+    const owner = getOwner(request);
+    if (owner.role === 99) return next();
+    const business = await Business.findById(owner.businessId).select("ownerRole").lean();
+    if (!business || owner.role !== Number(business.ownerRole))
+      throw new HttpError(403, "Only the owner can manage the public landing page");
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 export function createAccessToken(userId: string, businessId: string, sessionId: string) {
   return jwt.sign({ businessId, sid: sessionId, type: "access" }, env.JWT_SECRET, {
     subject: userId,

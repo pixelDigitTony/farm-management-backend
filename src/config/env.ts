@@ -13,6 +13,14 @@ const envSchema = v.object({
     "development-only-change-this-secret",
   ),
   FRONTEND_URL: v.optional(v.string(), "http://localhost:5173"),
+  PUBLIC_SITE_BASE_DOMAIN: v.optional(
+    v.pipe(
+      v.string(),
+      v.trim(),
+      v.toLowerCase(),
+      v.regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/),
+    ),
+  ),
   EMAIL_PROVIDER: v.optional(v.picklist(["resend", "console"]), "console"),
   RESEND_API_KEY: v.optional(v.string()),
   RESEND_EMAIL_FROM: v.optional(v.pipe(v.string(), v.email())),

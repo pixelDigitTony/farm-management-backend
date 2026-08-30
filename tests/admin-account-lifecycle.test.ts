@@ -54,6 +54,8 @@ describe("admin owner account lifecycle", () => {
         "Recipe",
         "CookingBatch",
         "KarenderiyaSale",
+        "LandingPage",
+        "LandingPageVariant",
       ]),
     );
     expect(names).not.toContain("Business");

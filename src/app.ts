@@ -5,11 +5,17 @@ import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
 import { env } from "./config/env.js";
+import { isAllowedCorsOrigin } from "./lib/cors-origin.js";
 import { mongoJsonReplacer } from "./lib/json.js";
 import { auditOwnerInteraction } from "./middleware/activity-audit.js";
-import { requireApproved, requireOwner, requireSuperAdmin } from "./middleware/auth.js";
+import {
+  requireApproved,
+  requireHighestBusinessRole,
+  requireOwner,
+  requireSuperAdmin,
+} from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
-import { authLimiter } from "./middleware/rate-limit.js";
+import { authLimiter, publicContentLimiter } from "./middleware/rate-limit.js";
 import { activityRouter } from "./routes/activity.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
@@ -17,6 +23,7 @@ import { calculationRouter } from "./routes/calculation.routes.js";
 import { calendarTodoRouter } from "./routes/calendar-todo.routes.js";
 import { dashboardRouter } from "./routes/dashboard.routes.js";
 import { employeeRouter, invitePublicRouter } from "./routes/employee.routes.js";
+import { landingPagePublicRouter, landingPageRouter } from "./routes/landing-page.routes.js";
 import { operationRouter } from "./routes/operation.routes.js";
 import { reportRouter } from "./routes/report.routes.js";
 import { resourceRouter } from "./routes/resource.routes.js";
@@ -25,7 +32,12 @@ import { settingsRouter } from "./routes/settings.routes.js";
 export const app = express();
 app.set("json replacer", mongoJsonReplacer);
 app.use(helmet());
-app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+app.use(
+  cors({
+    origin: (origin, callback) => callback(null, isAllowedCorsOrigin(origin, env.FRONTEND_URL)),
+    credentials: true,
+  }),
+);
 app.use(compression());
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
@@ -36,12 +48,37 @@ app.get("/api/health", (_request, response) =>
 );
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/invites", authLimiter, invitePublicRouter);
+app.use(
+  "/api/public",
+  cors({
+    origin: (origin, callback) =>
+      callback(
+        null,
+        isAllowedCorsOrigin(
+          origin,
+          env.FRONTEND_URL,
+          env.PUBLIC_SITE_BASE_DOMAIN,
+          env.NODE_ENV === "production",
+        ),
+      ),
+    credentials: true,
+  }),
+  publicContentLimiter,
+  landingPagePublicRouter,
+);
 app.use("/api", auditOwnerInteraction);
 app.use("/api/admin", requireOwner, requireSuperAdmin, adminRouter);
 app.use("/api/employees", requireOwner, requireApproved, employeeRouter);
 app.use("/api/dashboard", requireOwner, requireApproved, dashboardRouter);
 app.use("/api/calculations", requireOwner, requireApproved, calculationRouter);
 app.use("/api/calendar-todos", requireOwner, requireApproved, calendarTodoRouter);
+app.use(
+  "/api/landing-page",
+  requireOwner,
+  requireApproved,
+  requireHighestBusinessRole,
+  landingPageRouter,
+);
 app.use("/api/operations", requireOwner, requireApproved, operationRouter);
 app.use("/api/resources", requireOwner, requireApproved, resourceRouter);
 app.use("/api/reports", requireOwner, requireApproved, reportRouter);

@@ -83,6 +83,7 @@ Expected response:
 | `MONGODB_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/MissVBusiness` |
 | `JWT_SECRET` | Access-token signing secret; use a long random value in production | development fallback |
 | `FRONTEND_URL` | Allowed CORS origin and email-verification link base | `http://localhost:5173` |
+| `PUBLIC_SITE_BASE_DOMAIN` | Allows public landing-page API requests from wildcard business subdomains | unset locally; `yourdomain.com` in production |
 | `EMAIL_PROVIDER` | Email delivery through `console` or `resend` | `console` |
 | `RESEND_API_KEY` | Resend API key with Sending access | empty |
 | `RESEND_EMAIL_FROM` | Sender address on a verified Resend domain | empty |
@@ -254,9 +255,10 @@ npm run build
 1. Set `NODE_ENV=production`.
 2. Configure a production MongoDB URI and a strong unique `JWT_SECRET`.
 3. Set `FRONTEND_URL` to the exact deployed frontend origin.
-4. Configure Resend and a sender address on a verified domain.
-5. Run `npm install`, `npm run check`, `npm test`, and `npm run build`.
-6. Start the compiled server with `npm start`.
-7. Use HTTPS and back up MongoDB regularly.
+4. Set `PUBLIC_SITE_BASE_DOMAIN` to the same wildcard base domain configured by the frontend and DNS host.
+5. Configure Resend and a sender address on a verified domain.
+6. Run `npm install`, `npm run check`, `npm test`, and `npm run build`.
+7. Start the compiled server with `npm start`.
+8. Use HTTPS and back up MongoDB regularly.
 
 For requests where the frontend and API use different hosts, the API automatically issues the refresh cookie with `SameSite=None`, `Secure`, and `Partitioned`. This allows supported browsers to keep the session in the frontend site's cookie partition even when ordinary third-party cookies are blocked. `AUTH_COOKIE_SAME_SITE` remains the fallback policy for same-host requests.
