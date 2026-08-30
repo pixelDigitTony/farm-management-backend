@@ -198,6 +198,60 @@ const recipeIngredientSchema = v.object({
   expectedWastePercent: v.optional(amount, 0),
 });
 
+const googleDriveUrl = v.pipe(
+  v.string(),
+  v.trim(),
+  v.maxLength(2048),
+  v.check((value) => {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || url.hostname !== "drive.google.com") return false;
+      if (/^\/file\/d\/[A-Za-z0-9_-]+(?:\/|$)/.test(url.pathname)) return true;
+      return ["/open", "/uc"].includes(url.pathname) && Boolean(url.searchParams.get("id"));
+    } catch {
+      return false;
+    }
+  }, "Enter a Google Drive file sharing link"),
+);
+
+const menuMediaUrl = v.pipe(
+  v.string(),
+  v.trim(),
+  v.maxLength(2048),
+  v.check((value) => {
+    try {
+      const url = new URL(value);
+      if (url.protocol !== "https:") return false;
+      const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+      if (hostname === "drive.google.com") {
+        if (/^\/file\/d\/[A-Za-z0-9_-]+(?:\/|$)/.test(url.pathname)) return true;
+        return ["/open", "/uc"].includes(url.pathname) && Boolean(url.searchParams.get("id"));
+      }
+      if (hostname === "youtu.be") return /^\/[A-Za-z0-9_-]{11}(?:\/|$)/.test(url.pathname);
+      if (["youtube.com", "m.youtube.com", "youtube-nocookie.com"].includes(hostname)) {
+        if (url.pathname === "/watch")
+          return /^[A-Za-z0-9_-]{11}$/.test(url.searchParams.get("v") ?? "");
+        return /^\/(?:embed|shorts|live)\/[A-Za-z0-9_-]{11}(?:\/|$)/.test(url.pathname);
+      }
+      if (["facebook.com", "m.facebook.com", "web.facebook.com"].includes(hostname)) {
+        return (
+          /^\/(?:reel|share\/(?:v|r))\/[A-Za-z0-9._-]+(?:\/|$)/.test(url.pathname) ||
+          /^\/[^/]+\/videos\/[A-Za-z0-9._-]+(?:\/|$)/.test(url.pathname) ||
+          (["/watch", "/video.php"].includes(url.pathname.replace(/\/+$/, "")) &&
+            Boolean(url.searchParams.get("v")))
+        );
+      }
+      if (hostname === "fb.watch") return /^\/[A-Za-z0-9._-]+(?:\/|$)/.test(url.pathname);
+      return (
+        hostname === "instagram.com" &&
+        /^\/(?:p|reel|reels|tv)\/[A-Za-z0-9_-]+(?:\/|$)/.test(url.pathname)
+      );
+    } catch {
+      return false;
+    }
+  }, "Enter a Google Drive, YouTube, Instagram, or Facebook media link"),
+);
+
 export const menuRecipeOperationSchema = v.object({
   recipe: v.object({
     recipeCode: v.pipe(v.string(), v.trim(), v.minLength(1)),
@@ -217,6 +271,9 @@ export const menuRecipeOperationSchema = v.object({
     menuCode: v.pipe(v.string(), v.trim(), v.minLength(1)),
     name: v.pipe(v.string(), v.trim(), v.minLength(1)),
     category: v.optional(v.string()),
+    mediaUrls: v.optional(v.pipe(v.array(menuMediaUrl), v.maxLength(20))),
+    googleDriveUrl: v.optional(v.nullable(googleDriveUrl)),
+    googleDriveUrls: v.optional(v.pipe(v.array(googleDriveUrl), v.maxLength(20))),
     sellingPricePerServing: amount,
     targetFoodCostPercent: coercedNumber(0, false),
     calculatedCostPerServingCached: amount,
