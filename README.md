@@ -259,4 +259,4 @@ npm run build
 6. Start the compiled server with `npm start`.
 7. Use HTTPS and back up MongoDB regularly.
 
-If the frontend and API are on different sites, set `AUTH_COOKIE_SAME_SITE=none`. Production and cross-site refresh cookies are marked secure by the API.
+For requests where the frontend and API use different hosts, the API automatically issues the refresh cookie with `SameSite=None`, `Secure`, and `Partitioned`. This allows supported browsers to keep the session in the frontend site's cookie partition even when ordinary third-party cookies are blocked. `AUTH_COOKIE_SAME_SITE` remains the fallback policy for same-host requests.

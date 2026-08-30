@@ -8,14 +8,27 @@ import { AuthSession, Business, User } from "../models/index.js";
 const refreshCookieName = "miss_v_refresh";
 const refreshMaxAge = env.REFRESH_TOKEN_TTL_DAYS * 86_400_000;
 
-const cookieOptions = {
-  httpOnly: true,
-  secure: env.NODE_ENV === "production" || env.AUTH_COOKIE_SAME_SITE === "none",
-  sameSite: env.AUTH_COOKIE_SAME_SITE,
-  maxAge: refreshMaxAge,
-  path: "/api/auth",
-  ...(env.AUTH_COOKIE_DOMAIN ? { domain: env.AUTH_COOKIE_DOMAIN } : {}),
-} as const;
+export function getRefreshCookieOptions(request: Pick<Request, "get" | "hostname">) {
+  let crossSite = false;
+  const origin = request.get("origin");
+  if (origin) {
+    try {
+      crossSite = new URL(origin).hostname !== request.hostname;
+    } catch {
+      crossSite = false;
+    }
+  }
+  const sameSite = crossSite ? ("none" as const) : env.AUTH_COOKIE_SAME_SITE;
+  return {
+    httpOnly: true,
+    secure: env.NODE_ENV === "production" || sameSite === "none",
+    sameSite,
+    maxAge: refreshMaxAge,
+    path: "/api/auth",
+    ...(crossSite ? { partitioned: true } : {}),
+    ...(env.AUTH_COOKIE_DOMAIN ? { domain: env.AUTH_COOKIE_DOMAIN } : {}),
+  } as const;
+}
 
 export async function createSession(
   user: { _id: unknown; id: string; businessId: unknown },
@@ -33,7 +46,7 @@ export async function createSession(
     userAgent: request.get("user-agent") ?? null,
     expiresAt: new Date(Date.now() + refreshMaxAge),
   });
-  response.cookie(refreshCookieName, rawRefreshToken, cookieOptions);
+  response.cookie(refreshCookieName, rawRefreshToken, getRefreshCookieOptions(request));
   return createAccessToken(user.id, String(user.businessId), session.id);
 }
 
@@ -46,7 +59,6 @@ export async function rotateSession(request: Request, response: Response) {
     expiresAt: { $gt: new Date() },
   }).select("+refreshTokenHash");
   if (!session) {
-    clearRefreshCookie(response);
     throw new HttpError(401, "Session expired", undefined, "SESSION_EXPIRED");
   }
   const user = await User.findOne({
@@ -61,15 +73,30 @@ export async function rotateSession(request: Request, response: Response) {
     session.revokedAt = new Date();
     session.revokeReason = "SECURITY";
     await session.save();
-    clearRefreshCookie(response);
+    clearRefreshCookie(request, response);
     throw new HttpError(401, "Session expired", undefined, "SESSION_EXPIRED");
   }
   const replacement = createOpaqueToken();
-  session.refreshTokenHash = hashOpaqueToken(replacement);
-  session.lastUsedAt = new Date();
-  session.expiresAt = new Date(Date.now() + refreshMaxAge);
-  await session.save();
-  response.cookie(refreshCookieName, replacement, cookieOptions);
+  const rotatedSession = await AuthSession.findOneAndUpdate(
+    {
+      _id: session._id,
+      refreshTokenHash: hashOpaqueToken(rawToken),
+      revokedAt: null,
+      expiresAt: { $gt: new Date() },
+    },
+    {
+      $set: {
+        refreshTokenHash: hashOpaqueToken(replacement),
+        lastUsedAt: new Date(),
+        expiresAt: new Date(Date.now() + refreshMaxAge),
+      },
+    },
+    { new: true },
+  );
+  if (!rotatedSession) {
+    throw new HttpError(409, "Session refresh was superseded", undefined, "SESSION_SUPERSEDED");
+  }
+  response.cookie(refreshCookieName, replacement, getRefreshCookieOptions(request));
   return {
     token: createAccessToken(user.id, String(user.businessId), session.id),
     owner: publicOwner(user),
@@ -86,12 +113,12 @@ export async function revokeSession(request: Request, response: Response) {
       { new: true },
     );
   }
-  clearRefreshCookie(response);
+  clearRefreshCookie(request, response);
   return revokedSession;
 }
 
-export function clearRefreshCookie(response: Response) {
-  const { maxAge: _maxAge, ...clearOptions } = cookieOptions;
+export function clearRefreshCookie(request: Request, response: Response) {
+  const { maxAge: _maxAge, ...clearOptions } = getRefreshCookieOptions(request);
   response.clearCookie(refreshCookieName, clearOptions);
 }
 
