@@ -16,6 +16,7 @@ The API is the source of truth for all financial and inventory calculations. The
 - Cost recipes, create menu items, consume ingredients, and record cooking batches.
 - Record piggery and karenderiya sales.
 - Generate dashboard summaries and date-filtered reports.
+- Persist landing-page sections and variants, then publish immutable public snapshots.
 - Keep an owner-scoped audit trail of API activity and data changes.
 
 ## Technology
@@ -160,6 +161,8 @@ Business routes require an approved account and an access token in the `Authoriz
 | `/api/admin` | Role-99 approval queue |
 | `/api/employees` | Highest-role employee, role, and invite management |
 | `/api/invites` | Opaque-link status and invited-user registration |
+| `/api/landing-page` | Owner-only landing-page sections, variants, settings, and publishing |
+| `/api/public/landing-pages/:slug` | Public published snapshot and available menu content |
 
 ### Transaction operations
 

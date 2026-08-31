@@ -26,8 +26,10 @@ const componentId = v.pipe(
   v.maxLength(80),
   v.regex(/^[A-Za-z0-9_-]+$/),
 );
-const width = v.optional(v.picklist(["FULL", "HALF", "THIRD"]), "FULL");
+const width = v.optional(v.picklist(["FULL", "TWO_THIRDS", "HALF", "THIRD"]), "FULL");
 const enabled = v.optional(v.boolean(), true);
+const color = v.pipe(v.string(), v.regex(/^#[0-9a-fA-F]{6}$/));
+const inheritedColor = v.optional(v.union([v.literal(""), color]), "");
 
 const heroComponent = v.object({
   id: componentId,
@@ -127,11 +129,23 @@ export const landingPageComponentSchema = v.variant("type", [
   ctaComponent,
 ]);
 
+export const landingPageSectionSchema = v.object({
+  id: componentId,
+  name: requiredText(80),
+  enabled,
+  backgroundColor: inheritedColor,
+  textColor: inheritedColor,
+  contentWidth: v.optional(v.picklist(["FULL", "WIDE", "CONTAINED"]), "WIDE"),
+  padding: v.optional(v.picklist(["NONE", "SMALL", "MEDIUM", "LARGE"]), "MEDIUM"),
+  gap: v.optional(v.picklist(["NONE", "SMALL", "MEDIUM", "LARGE"]), "MEDIUM"),
+  components: v.pipe(v.array(landingPageComponentSchema), v.maxLength(30)),
+});
+
 export const landingPageThemeSchema = v.object({
-  primaryColor: v.pipe(v.string(), v.regex(/^#[0-9a-fA-F]{6}$/)),
-  backgroundColor: v.pipe(v.string(), v.regex(/^#[0-9a-fA-F]{6}$/)),
-  surfaceColor: v.pipe(v.string(), v.regex(/^#[0-9a-fA-F]{6}$/)),
-  textColor: v.pipe(v.string(), v.regex(/^#[0-9a-fA-F]{6}$/)),
+  primaryColor: color,
+  backgroundColor: color,
+  surfaceColor: color,
+  textColor: color,
   fontStyle: v.picklist(["MODERN", "CLASSIC"]),
   buttonStyle: v.picklist(["ROUNDED", "PILL", "SQUARE"]),
 });
@@ -158,7 +172,29 @@ export const landingPageVariantCreateSchema = v.object({
 export const landingPageVariantUpdateSchema = v.object({
   name: requiredText(80),
   theme: landingPageThemeSchema,
-  components: v.pipe(v.array(landingPageComponentSchema), v.minLength(1), v.maxLength(30)),
+  sections: v.pipe(
+    v.array(landingPageSectionSchema),
+    v.minLength(1),
+    v.maxLength(20),
+    v.check(
+      (sections) => sections.reduce((count, section) => count + section.components.length, 0) >= 1,
+      "Add at least one component before saving",
+    ),
+    v.check(
+      (sections) => sections.reduce((count, section) => count + section.components.length, 0) <= 30,
+      "Use no more than 30 components",
+    ),
+    v.check(
+      (sections) => new Set(sections.map((section) => section.id)).size === sections.length,
+      "Use a unique id for every section",
+    ),
+    v.check((sections) => {
+      const ids = sections.flatMap((section) =>
+        section.components.map((component) => component.id),
+      );
+      return new Set(ids).size === ids.length;
+    }, "Use a unique id for every component"),
+  ),
 });
 
 export type LandingPageVariantInput = v.InferOutput<typeof landingPageVariantUpdateSchema>;

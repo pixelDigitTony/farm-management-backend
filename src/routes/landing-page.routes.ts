@@ -81,6 +81,48 @@ function defaultComponents(business: any) {
   ];
 }
 
+function createSection(name: string, components: unknown[], options: Record<string, unknown> = {}) {
+  return {
+    id: randomUUID(),
+    name,
+    enabled: true,
+    backgroundColor: "",
+    textColor: "",
+    contentWidth: "WIDE",
+    padding: "MEDIUM",
+    gap: "MEDIUM",
+    components,
+    ...options,
+  };
+}
+
+function defaultSections(business: any) {
+  const components = defaultComponents(business);
+  return [
+    createSection("Welcome", components.slice(0, 1), { padding: "LARGE" }),
+    createSection("Our story", components.slice(1, 2)),
+    createSection("Featured menu", components.slice(2, 3), { padding: "LARGE" }),
+    createSection("Contact", components.slice(3, 4), { padding: "LARGE" }),
+  ];
+}
+
+function normalizedSections(source: { sections?: unknown; components?: unknown }) {
+  if (Array.isArray(source.sections) && source.sections.length) return source.sections;
+  const components = Array.isArray(source.components) ? source.components : [];
+  return [createSection("Main section", components)];
+}
+
+function serializedVariant(source: Record<string, unknown>) {
+  const sections = normalizedSections(source) as Array<{ components: unknown[] }>;
+  const { components: _legacyComponents, ...rest } = source;
+  return {
+    ...rest,
+    sections,
+    // Temporary compatibility for a frontend deployed before section support.
+    components: sections.flatMap((section) => section.components),
+  };
+}
+
 async function createSlug(name: string) {
   const base = name
     .toLowerCase()
@@ -104,11 +146,13 @@ async function getPage(businessId: mongoose.Types.ObjectId) {
   return page;
 }
 
-function selectedMenuIds(components: LandingPageVariantInput["components"]) {
+function selectedMenuIds(sections: LandingPageVariantInput["sections"]) {
   return [
     ...new Set(
-      components.flatMap((component) =>
-        component.type === "MENU" ? component.content.menuItemIds : [],
+      sections.flatMap((section) =>
+        section.components.flatMap((component) =>
+          component.type === "MENU" ? component.content.menuItemIds : [],
+        ),
       ),
     ),
   ];
@@ -116,9 +160,9 @@ function selectedMenuIds(components: LandingPageVariantInput["components"]) {
 
 async function validateMenuItems(
   businessId: mongoose.Types.ObjectId,
-  components: LandingPageVariantInput["components"],
+  sections: LandingPageVariantInput["sections"],
 ) {
-  const ids = selectedMenuIds(components);
+  const ids = selectedMenuIds(sections);
   if (ids.some((id) => !mongoose.isValidObjectId(id)))
     throw new HttpError(422, "Select valid menu items");
   if (!ids.length) return;
@@ -137,7 +181,8 @@ async function builderPayload(businessId: mongoose.Types.ObjectId) {
       .sort({ name: 1 })
       .lean(),
   ]);
-  return { page, variants, menuItems };
+  const normalizedVariants = variants.map((variant) => serializedVariant(variant));
+  return { page, variants: normalizedVariants, menuItems };
 }
 
 landingPageRouter.get("/", async (request, response) => {
@@ -162,7 +207,7 @@ landingPageRouter.post("/", async (request, response) => {
       landingPageId: page._id,
       name: "Main",
       theme: defaultTheme,
-      components: defaultComponents(business),
+      sections: defaultSections(business),
       createdByUserId: owner.userId,
       updatedByUserId: owner.userId,
     });
@@ -206,26 +251,33 @@ landingPageRouter.post("/variants", async (request, response) => {
     landingPageId: page._id,
     name: input.name,
     theme: duplicate?.theme ?? defaultTheme,
-    components:
-      duplicate?.components ?? defaultComponents(await Business.findById(owner.businessId).lean()),
+    sections: duplicate
+      ? normalizedSections(duplicate)
+      : defaultSections(await Business.findById(owner.businessId).lean()),
     createdByUserId: owner.userId,
     updatedByUserId: owner.userId,
   });
-  response.status(201).json(variant);
+  response.status(201).json(serializedVariant(variant.toObject()));
 });
 
 landingPageRouter.patch("/variants/:id", async (request, response) => {
   const owner = getOwner(request);
   if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(400, "Invalid variant id");
-  const input = v.parse(landingPageVariantUpdateSchema, request.body);
-  await validateMenuItems(owner.businessId, input.components);
+  const input = v.parse(landingPageVariantUpdateSchema, {
+    ...request.body,
+    sections: normalizedSections(request.body),
+  });
+  await validateMenuItems(owner.businessId, input.sections);
   const variant = await LandingPageVariant.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
-    { ...input, updatedByUserId: owner.userId },
+    {
+      $set: { ...input, updatedByUserId: owner.userId },
+      $unset: { components: 1 },
+    },
     { new: true, runValidators: true },
   );
   if (!variant) throw new HttpError(404, "Landing-page variant was not found");
-  response.json(variant);
+  response.json(serializedVariant(variant.toObject()));
 });
 
 landingPageRouter.delete("/variants/:id", async (request, response) => {
@@ -253,15 +305,24 @@ landingPageRouter.post("/variants/:id/publish", async (request, response) => {
     LandingPageVariant.findOne({ _id: request.params.id, businessId: owner.businessId }).lean(),
   ]);
   if (!variant) throw new HttpError(404, "Landing-page variant was not found");
-  const input = v.parse(landingPageVariantUpdateSchema, variant);
-  await validateMenuItems(owner.businessId, input.components);
+  const input = v.parse(landingPageVariantUpdateSchema, {
+    ...variant,
+    sections: normalizedSections(variant),
+  });
+  if (
+    !input.sections.some(
+      (section) => section.enabled && section.components.some((component) => component.enabled),
+    )
+  )
+    throw new HttpError(422, "Show at least one component before publishing");
+  await validateMenuItems(owner.businessId, input.sections);
   page.isPublished = true;
   page.publishedVariantId = variant._id;
   page.publishedSnapshot = {
     variantId: String(variant._id),
     name: input.name,
     theme: input.theme,
-    components: input.components,
+    sections: input.sections,
     siteTitle: page.siteTitle,
     seoDescription: page.seoDescription,
   };
@@ -296,7 +357,8 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     siteTitle: string;
     seoDescription: string;
   };
-  const ids = selectedMenuIds(snapshot.components);
+  const sections = normalizedSections(snapshot);
+  const ids = selectedMenuIds(sections as LandingPageVariantInput["sections"]);
   const menuItems = await MenuItem.find({
     _id: { $in: ids },
     businessId: page.businessId,
@@ -310,7 +372,13 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     siteTitle: snapshot.siteTitle,
     seoDescription: snapshot.seoDescription,
     publishedAt: page.publishedAt,
-    variant: { theme: snapshot.theme, components: snapshot.components },
+    variant: {
+      theme: snapshot.theme,
+      sections,
+      components: (sections as Array<{ components: unknown[] }>).flatMap(
+        (section) => section.components,
+      ),
+    },
     menuItems,
   });
 });
