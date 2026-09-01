@@ -73,6 +73,32 @@ const menuComponent = v.object({
   }),
 });
 
+const catalogReference = v.object({
+  sourceType: v.picklist(["MENU_ITEM", "PRODUCT"]),
+  sourceId: v.pipe(v.string(), v.minLength(1), v.maxLength(80)),
+});
+
+const catalogComponent = v.object({
+  id: componentId,
+  type: v.literal("CATALOG"),
+  enabled,
+  width,
+  content: v.object({
+    heading: requiredText(120),
+    body: shortText(500),
+    catalogItemRefs: v.pipe(
+      v.array(catalogReference),
+      v.maxLength(24),
+      v.check(
+        (items) =>
+          new Set(items.map((item) => `${item.sourceType}:${item.sourceId}`)).size === items.length,
+        "Select each catalog item once",
+      ),
+    ),
+    columns: v.optional(v.picklist([2, 3, 4]), 3),
+  }),
+});
+
 const galleryComponent = v.object({
   id: componentId,
   type: v.literal("GALLERY"),
@@ -124,6 +150,7 @@ export const landingPageComponentSchema = v.variant("type", [
   heroComponent,
   textComponent,
   menuComponent,
+  catalogComponent,
   galleryComponent,
   contactComponent,
   ctaComponent,
@@ -150,6 +177,85 @@ export const landingPageThemeSchema = v.object({
   buttonStyle: v.picklist(["ROUNDED", "PILL", "SQUARE"]),
 });
 
+export const defaultLandingPageCommerceSettings = {
+  orderingEnabled: true,
+  cartButtonLabel: "Cart",
+  cartButtonPosition: "BOTTOM_RIGHT" as const,
+  fulfillmentMethods: ["PICKUP", "DELIVERY"] as Array<"PICKUP" | "DELIVERY">,
+  paymentMethods: ["PAY_ON_PICKUP", "CASH_ON_DELIVERY"] as Array<
+    "PAY_ON_PICKUP" | "CASH_ON_DELIVERY"
+  >,
+  checkoutInstructions: "The owner will review your order before confirming it.",
+  minimumOrder: 0,
+  deliveryFee: 0,
+};
+
+const uniqueSelection = <T>(items: T[]) => new Set(items).size === items.length;
+
+export const landingPageCommerceSettingsSchema = v.pipe(
+  v.object({
+    orderingEnabled: v.optional(v.boolean(), true),
+    cartButtonLabel: v.optional(requiredText(30), "Cart"),
+    cartButtonPosition: v.optional(v.picklist(["BOTTOM_RIGHT", "BOTTOM_LEFT"]), "BOTTOM_RIGHT"),
+    fulfillmentMethods: v.optional(
+      v.pipe(
+        v.array(v.picklist(["PICKUP", "DELIVERY"])),
+        v.maxLength(2),
+        v.check(uniqueSelection, "Select each fulfillment method once"),
+      ),
+      ["PICKUP", "DELIVERY"],
+    ),
+    paymentMethods: v.optional(
+      v.pipe(
+        v.array(v.picklist(["PAY_ON_PICKUP", "CASH_ON_DELIVERY"])),
+        v.maxLength(2),
+        v.check(uniqueSelection, "Select each payment method once"),
+      ),
+      ["PAY_ON_PICKUP", "CASH_ON_DELIVERY"],
+    ),
+    checkoutInstructions: v.optional(
+      shortText(500),
+      defaultLandingPageCommerceSettings.checkoutInstructions,
+    ),
+    minimumOrder: v.optional(
+      v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1_000_000)),
+      0,
+    ),
+    deliveryFee: v.optional(
+      v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1_000_000)),
+      0,
+    ),
+  }),
+  v.check(
+    (settings) => !settings.orderingEnabled || settings.fulfillmentMethods.length > 0,
+    "Enable at least one fulfillment method when ordering is enabled",
+  ),
+  v.check(
+    (settings) =>
+      !settings.fulfillmentMethods.includes("PICKUP") ||
+      settings.paymentMethods.includes("PAY_ON_PICKUP"),
+    "Pickup requires pay on pickup",
+  ),
+  v.check(
+    (settings) =>
+      !settings.fulfillmentMethods.includes("DELIVERY") ||
+      settings.paymentMethods.includes("CASH_ON_DELIVERY"),
+    "Delivery requires cash on delivery",
+  ),
+  v.check(
+    (settings) =>
+      !settings.paymentMethods.includes("PAY_ON_PICKUP") ||
+      settings.fulfillmentMethods.includes("PICKUP"),
+    "Pay on pickup requires pickup fulfillment",
+  ),
+  v.check(
+    (settings) =>
+      !settings.paymentMethods.includes("CASH_ON_DELIVERY") ||
+      settings.fulfillmentMethods.includes("DELIVERY"),
+    "Cash on delivery requires delivery fulfillment",
+  ),
+);
+
 export const landingPageSettingsSchema = v.object({
   slug: v.pipe(
     v.string(),
@@ -172,6 +278,7 @@ export const landingPageVariantCreateSchema = v.object({
 export const landingPageVariantUpdateSchema = v.object({
   name: requiredText(80),
   theme: landingPageThemeSchema,
+  commerce: v.optional(landingPageCommerceSettingsSchema, defaultLandingPageCommerceSettings),
   sections: v.pipe(
     v.array(landingPageSectionSchema),
     v.minLength(1),

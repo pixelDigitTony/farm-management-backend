@@ -53,6 +53,40 @@ describe("landing-page validation", () => {
   it("accepts a responsive component variant and safe action links", () => {
     const result = parse(landingPageVariantUpdateSchema, variant());
     expect(result.sections[0]?.components[0]?.type).toBe("HERO");
+    expect(result.commerce.cartButtonLabel).toBe("Cart");
+    expect(result.commerce.fulfillmentMethods).toEqual(["PICKUP", "DELIVERY"]);
+  });
+
+  it("accepts storefront settings and rejects unusable checkout combinations", () => {
+    const configured = variant() as ReturnType<typeof variant> & {
+      commerce: Record<string, unknown>;
+    };
+    configured.commerce = {
+      orderingEnabled: true,
+      cartButtonLabel: "My basket",
+      cartButtonPosition: "BOTTOM_LEFT",
+      fulfillmentMethods: ["DELIVERY"],
+      paymentMethods: ["CASH_ON_DELIVERY"],
+      checkoutInstructions: "Delivery is available from 9 AM to 5 PM.",
+      minimumOrder: 250,
+      deliveryFee: 50,
+    };
+    const parsed = parse(landingPageVariantUpdateSchema, configured);
+    expect(parsed.commerce.minimumOrder).toBe(250);
+    expect(parsed.commerce.deliveryFee).toBe(50);
+
+    const withoutFulfillment = structuredClone(configured);
+    withoutFulfillment.commerce.fulfillmentMethods = [];
+    withoutFulfillment.commerce.paymentMethods = [];
+    expect(() => parse(landingPageVariantUpdateSchema, withoutFulfillment)).toThrow();
+
+    const mismatchedPayment = structuredClone(configured);
+    mismatchedPayment.commerce.fulfillmentMethods = ["PICKUP"];
+    expect(() => parse(landingPageVariantUpdateSchema, mismatchedPayment)).toThrow();
+
+    const negativeFee = structuredClone(configured);
+    negativeFee.commerce.deliveryFee = -1;
+    expect(() => parse(landingPageVariantUpdateSchema, negativeFee)).toThrow();
   });
 
   it("rejects unsafe links and invalid theme colors", () => {
@@ -99,6 +133,28 @@ describe("landing-page validation", () => {
     if (!onlySection) throw new Error("Expected a section fixture");
     onlySection.components = [];
     expect(() => parse(landingPageVariantUpdateSchema, emptyPage)).toThrow();
+  });
+
+  it("accepts a mixed food and merchandise catalog component", () => {
+    const catalog = variant();
+    const section = catalog.sections[0];
+    if (!section) throw new Error("Expected a section fixture");
+    section.components.push({
+      id: "catalog-1",
+      type: "CATALOG",
+      enabled: true,
+      width: "FULL",
+      content: {
+        heading: "Featured products",
+        body: "Food, clothing, and farm products",
+        catalogItemRefs: [
+          { sourceType: "MENU_ITEM", sourceId: "507f1f77bcf86cd799439011" },
+          { sourceType: "PRODUCT", sourceId: "507f191e810c19729de860ea" },
+        ],
+        columns: 3,
+      },
+    } as never);
+    expect(parse(landingPageVariantUpdateSchema, catalog).sections[0]?.components).toHaveLength(2);
   });
 
   it("normalizes public slugs and rejects path-like values", () => {

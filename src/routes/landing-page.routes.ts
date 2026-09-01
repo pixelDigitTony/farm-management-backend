@@ -4,9 +4,22 @@ import mongoose from "mongoose";
 import * as v from "valibot";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
-import { Business, LandingPage, LandingPageVariant, MenuItem } from "../models/index.js";
 import {
+  Business,
+  CatalogProduct,
+  LandingPage,
+  LandingPageVariant,
+  MenuItem,
+} from "../models/index.js";
+import {
+  getBuilderCatalogItems,
+  getPublicCatalogItems,
+  selectedCatalogReferences,
+} from "../services/commerce.service.js";
+import {
+  defaultLandingPageCommerceSettings,
   type LandingPageVariantInput,
+  landingPageCommerceSettingsSchema,
   landingPageSettingsSchema,
   landingPageVariantCreateSchema,
   landingPageVariantUpdateSchema,
@@ -117,6 +130,7 @@ function serializedVariant(source: Record<string, unknown>) {
   const { components: _legacyComponents, ...rest } = source;
   return {
     ...rest,
+    commerce: source.commerce ?? defaultLandingPageCommerceSettings,
     sections,
     // Temporary compatibility for a frontend deployed before section support.
     components: sections.flatMap((section) => section.components),
@@ -170,8 +184,31 @@ async function validateMenuItems(
   if (count !== ids.length) throw new HttpError(422, "One or more menu items are unavailable");
 }
 
+async function validateCatalogItems(
+  businessId: mongoose.Types.ObjectId,
+  sections: LandingPageVariantInput["sections"],
+) {
+  const references = selectedCatalogReferences({ sections }).filter(
+    (reference) => reference.sourceType === "PRODUCT" || reference.sourceType === "MENU_ITEM",
+  );
+  const menuIds = references
+    .filter((reference) => reference.sourceType === "MENU_ITEM")
+    .map((reference) => reference.sourceId);
+  const productIds = references
+    .filter((reference) => reference.sourceType === "PRODUCT")
+    .map((reference) => reference.sourceId);
+  if ([...menuIds, ...productIds].some((id) => !mongoose.isValidObjectId(id)))
+    throw new HttpError(422, "Select valid catalog items");
+  const [menuCount, productCount] = await Promise.all([
+    MenuItem.countDocuments({ _id: { $in: menuIds }, businessId, isActive: true }),
+    CatalogProduct.countDocuments({ _id: { $in: productIds }, businessId, isActive: true }),
+  ]);
+  if (menuCount !== new Set(menuIds).size || productCount !== new Set(productIds).size)
+    throw new HttpError(422, "One or more catalog items are unavailable");
+}
+
 async function builderPayload(businessId: mongoose.Types.ObjectId) {
-  const [page, variants, menuItems] = await Promise.all([
+  const [page, variants, menuItems, catalogItems] = await Promise.all([
     LandingPage.findOne({ businessId }).lean(),
     LandingPageVariant.find({ businessId }).sort({ createdAt: 1 }).lean(),
     MenuItem.find({ businessId, isActive: true })
@@ -180,9 +217,10 @@ async function builderPayload(businessId: mongoose.Types.ObjectId) {
       )
       .sort({ name: 1 })
       .lean(),
+    getBuilderCatalogItems(businessId),
   ]);
   const normalizedVariants = variants.map((variant) => serializedVariant(variant));
-  return { page, variants: normalizedVariants, menuItems };
+  return { page, variants: normalizedVariants, menuItems, catalogItems };
 }
 
 landingPageRouter.get("/", async (request, response) => {
@@ -207,6 +245,7 @@ landingPageRouter.post("/", async (request, response) => {
       landingPageId: page._id,
       name: "Main",
       theme: defaultTheme,
+      commerce: defaultLandingPageCommerceSettings,
       sections: defaultSections(business),
       createdByUserId: owner.userId,
       updatedByUserId: owner.userId,
@@ -251,6 +290,7 @@ landingPageRouter.post("/variants", async (request, response) => {
     landingPageId: page._id,
     name: input.name,
     theme: duplicate?.theme ?? defaultTheme,
+    commerce: duplicate?.commerce ?? defaultLandingPageCommerceSettings,
     sections: duplicate
       ? normalizedSections(duplicate)
       : defaultSections(await Business.findById(owner.businessId).lean()),
@@ -268,6 +308,7 @@ landingPageRouter.patch("/variants/:id", async (request, response) => {
     sections: normalizedSections(request.body),
   });
   await validateMenuItems(owner.businessId, input.sections);
+  await validateCatalogItems(owner.businessId, input.sections);
   const variant = await LandingPageVariant.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
     {
@@ -316,12 +357,14 @@ landingPageRouter.post("/variants/:id/publish", async (request, response) => {
   )
     throw new HttpError(422, "Show at least one component before publishing");
   await validateMenuItems(owner.businessId, input.sections);
+  await validateCatalogItems(owner.businessId, input.sections);
   page.isPublished = true;
   page.publishedVariantId = variant._id;
   page.publishedSnapshot = {
     variantId: String(variant._id),
     name: input.name,
     theme: input.theme,
+    commerce: input.commerce,
     sections: input.sections,
     siteTitle: page.siteTitle,
     seoDescription: page.seoDescription,
@@ -357,6 +400,10 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     siteTitle: string;
     seoDescription: string;
   };
+  const commerce = v.parse(
+    landingPageCommerceSettingsSchema,
+    snapshot.commerce ?? defaultLandingPageCommerceSettings,
+  );
   const sections = normalizedSections(snapshot);
   const ids = selectedMenuIds(sections as LandingPageVariantInput["sections"]);
   const menuItems = await MenuItem.find({
@@ -367,6 +414,10 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
   })
     .select("name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing")
     .lean();
+  const catalogItems = await getPublicCatalogItems(
+    page.businessId,
+    selectedCatalogReferences({ sections }),
+  );
   response.json({
     slug: page.slug,
     siteTitle: snapshot.siteTitle,
@@ -374,11 +425,13 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     publishedAt: page.publishedAt,
     variant: {
       theme: snapshot.theme,
+      commerce,
       sections,
       components: (sections as Array<{ components: unknown[] }>).flatMap(
         (section) => section.components,
       ),
     },
     menuItems,
+    catalogItems,
   });
 });

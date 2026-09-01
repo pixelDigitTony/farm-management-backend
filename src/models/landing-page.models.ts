@@ -26,6 +26,7 @@ const landingPageVariantSchema = new Schema(
     landingPageId: objectId("LandingPage", true),
     name: { type: String, required: true, trim: true },
     theme: { type: Schema.Types.Mixed, required: true },
+    commerce: { type: Schema.Types.Mixed, required: true, default: {} },
     sections: { type: [Schema.Types.Mixed], default: [] },
     // Kept temporarily so existing variants can be migrated into a default section on their next save.
     components: { type: [Schema.Types.Mixed], default: [] },

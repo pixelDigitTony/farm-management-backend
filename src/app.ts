@@ -21,6 +21,7 @@ import { adminRouter } from "./routes/admin.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { calculationRouter } from "./routes/calculation.routes.js";
 import { calendarTodoRouter } from "./routes/calendar-todo.routes.js";
+import { catalogRouter, commercePublicRouter, orderRouter } from "./routes/commerce.routes.js";
 import { dashboardRouter } from "./routes/dashboard.routes.js";
 import { employeeRouter, invitePublicRouter } from "./routes/employee.routes.js";
 import { landingPagePublicRouter, landingPageRouter } from "./routes/landing-page.routes.js";
@@ -65,6 +66,7 @@ app.use(
   }),
   publicContentLimiter,
   landingPagePublicRouter,
+  commercePublicRouter,
 );
 app.use("/api", auditOwnerInteraction);
 app.use("/api/admin", requireOwner, requireSuperAdmin, adminRouter);
@@ -79,6 +81,8 @@ app.use(
   requireHighestBusinessRole,
   landingPageRouter,
 );
+app.use("/api/catalog", requireOwner, requireApproved, requireHighestBusinessRole, catalogRouter);
+app.use("/api/orders", requireOwner, requireApproved, requireHighestBusinessRole, orderRouter);
 app.use("/api/operations", requireOwner, requireApproved, operationRouter);
 app.use("/api/resources", requireOwner, requireApproved, resourceRouter);
 app.use("/api/reports", requireOwner, requireApproved, reportRouter);

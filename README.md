@@ -17,6 +17,8 @@ The API is the source of truth for all financial and inventory calculations. The
 - Record piggery and karenderiya sales.
 - Generate dashboard summaries and date-filtered reports.
 - Persist landing-page sections and variants, then publish immutable public snapshots.
+- Manage a mixed food and merchandise catalog, guest checkout, and owner-reviewed customer orders.
+- Store cart and checkout rules with each landing-page variant and enforce ordering state, fulfillment methods, minimum orders, and delivery fees on the server.
 - Keep an owner-scoped audit trail of API activity and data changes.
 
 ## Technology
@@ -162,7 +164,10 @@ Business routes require an approved account and an access token in the `Authoriz
 | `/api/employees` | Highest-role employee, role, and invite management |
 | `/api/invites` | Opaque-link status and invited-user registration |
 | `/api/landing-page` | Owner-only landing-page sections, variants, settings, and publishing |
+| `/api/catalog` | Owner-only clothing, merchandise, and general product catalog |
+| `/api/orders` | Owner-only pending-order review and fulfillment status workflow |
 | `/api/public/landing-pages/:slug` | Public published snapshot and available menu content |
+| `/api/public/landing-pages/:slug/orders` | Rate-limited guest checkout for published products |
 
 ### Transaction operations
 
@@ -214,6 +219,8 @@ Posting-managed records cannot be created or edited directly through the generic
 - Menu and recipe creation uses one backend workflow to avoid leaving an orphan recipe.
 - Referenced pigs, inventory items, recipes, and menu items cannot be deleted while dependent records still use them.
 - Financial and inventory records should be corrected or reversed through their operation route rather than modified directly.
+- A public checkout creates a pending customer order and never posts cash or operational inventory automatically.
+- Confirming an order reserves finite general-product quantities; cancellation restores them. Food availability continues to use the Menu module.
 
 ## Source layout
 
