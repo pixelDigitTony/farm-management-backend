@@ -57,6 +57,7 @@ describe("admin owner account lifecycle", () => {
         "LandingPage",
         "LandingPageVariant",
         "CatalogProduct",
+        "CatalogDiscount",
         "CustomerOrder",
       ]),
     );

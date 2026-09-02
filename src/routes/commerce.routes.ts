@@ -4,13 +4,15 @@ import * as v from "valibot";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
 import { publicOrderLimiter } from "../middleware/rate-limit.js";
-import { CatalogProduct, CustomerOrder } from "../models/index.js";
+import { CatalogDiscount, CatalogProduct, CustomerOrder } from "../models/index.js";
+import { priceCatalogProducts, saveCatalogDiscount } from "../services/catalog-discount.service.js";
 import {
   createCatalogProduct,
   createPublicOrder,
   normalizeProductInput,
   updateOrderStatus,
 } from "../services/commerce.service.js";
+import { catalogDiscountInput } from "../validation/catalog-discount.js";
 import {
   catalogProductSchema,
   orderStatusSchema,
@@ -26,7 +28,71 @@ catalogRouter.get("/products", async (request, response) => {
   const products = await CatalogProduct.find({ businessId: owner.businessId })
     .sort({ isActive: -1, name: 1 })
     .lean();
-  response.json({ items: products });
+  response.set("Cache-Control", "no-store");
+  response.json({
+    items: await priceCatalogProducts(owner.businessId, products),
+    serverTime: new Date().toISOString(),
+  });
+});
+
+catalogRouter.get("/discounts", async (request, response) => {
+  const { businessId } = getOwner(request);
+  const items = await CatalogDiscount.find({ businessId }).sort({ createdAt: -1 }).lean();
+  response.json({ items, serverTime: new Date().toISOString() });
+});
+
+catalogRouter.post("/discounts", async (request, response) => {
+  response
+    .status(201)
+    .json(
+      await saveCatalogDiscount(
+        getOwner(request).businessId,
+        v.parse(catalogDiscountInput, request.body),
+      ),
+    );
+});
+
+catalogRouter.put("/discounts/:id", async (request, response) => {
+  response.json(
+    await saveCatalogDiscount(
+      getOwner(request).businessId,
+      v.parse(catalogDiscountInput, request.body),
+      String(request.params.id),
+    ),
+  );
+});
+
+catalogRouter.patch("/discounts/:id/status", async (request, response) => {
+  const { businessId } = getOwner(request);
+  if (!mongoose.isValidObjectId(request.params.id))
+    throw new HttpError(400, "Invalid promotion id");
+  const { isEnabled } = v.parse(v.object({ isEnabled: v.boolean() }), request.body);
+  // Deactivation is always allowed, including expired promotions or archived products.
+  if (!isEnabled) {
+    const promotion = await CatalogDiscount.findOneAndUpdate(
+      { _id: request.params.id, businessId },
+      { $set: { isEnabled: false } },
+      { new: true },
+    ).lean();
+    if (!promotion) throw new HttpError(404, "Promotion was not found");
+    response.json(promotion);
+    return;
+  }
+  const promotion = await CatalogDiscount.findOne({ _id: request.params.id, businessId }).lean();
+  if (!promotion) throw new HttpError(404, "Promotion was not found");
+  response.json(
+    await saveCatalogDiscount(
+      businessId,
+      v.parse(catalogDiscountInput, {
+        ...promotion,
+        isEnabled: true,
+        productIds: promotion.productIds.map(String),
+        startsAt: new Date(promotion.startsAt).toISOString(),
+        endsAt: new Date(promotion.endsAt).toISOString(),
+      }),
+      String(request.params.id),
+    ),
+  );
 });
 
 catalogRouter.post("/products", async (request, response) => {

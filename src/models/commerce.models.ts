@@ -49,6 +49,27 @@ const catalogProductSchema = new Schema(
 catalogProductSchema.index({ businessId: 1, productCode: 1 }, { unique: true });
 catalogProductSchema.index({ businessId: 1, isActive: 1, name: 1 });
 
+const catalogDiscountSchema = new Schema(
+  {
+    businessId: objectId("Business", true),
+    name: { type: String, required: true, trim: true, maxlength: 120 },
+    type: { type: String, enum: ["PERCENTAGE", "FIXED"], required: true },
+    value: { type: Number, required: true, min: 0 },
+    productIds: { type: [Schema.Types.ObjectId], ref: "CatalogProduct", required: true },
+    startsAt: { type: Date, required: true },
+    endsAt: { type: Date, required: true },
+    isEnabled: { type: Boolean, default: true },
+  },
+  schemaOptions,
+);
+// A single promotion document makes bulk changes atomic. This index also blocks
+// concurrent requests assigning different enabled promotions to the same product.
+catalogDiscountSchema.index(
+  { businessId: 1, productIds: 1 },
+  { unique: true, partialFilterExpression: { isEnabled: true } },
+);
+catalogDiscountSchema.index({ businessId: 1, endsAt: 1 });
+
 const orderItemSchema = new Schema(
   {
     sourceType: { type: String, enum: ["MENU_ITEM", "PRODUCT"], required: true },
@@ -59,6 +80,20 @@ const orderItemSchema = new Schema(
     variantSnapshot: { type: String, default: "" },
     mediaUrlSnapshot: { type: String, default: "" },
     unitPrice: money,
+    originalUnitPrice: optionalMoney,
+    discountAmount: optionalMoney,
+    discountSnapshot: {
+      type: new Schema(
+        {
+          promotionId: objectId("CatalogDiscount"),
+          name: String,
+          type: String,
+          value: Number,
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
     quantity: { type: Number, required: true, min: 1, max: 99 },
     lineTotal: money,
   },
@@ -124,4 +159,5 @@ customerOrderSchema.index({ businessId: 1, status: 1, createdAt: -1 });
 customerOrderSchema.index({ businessId: 1, "customer.phone": 1, createdAt: -1 });
 
 export const CatalogProduct = createModel("CatalogProduct", catalogProductSchema);
+export const CatalogDiscount = createModel("CatalogDiscount", catalogDiscountSchema);
 export const CustomerOrder = createModel("CustomerOrder", customerOrderSchema);

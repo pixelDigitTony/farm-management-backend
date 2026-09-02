@@ -418,8 +418,10 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     page.businessId,
     selectedCatalogReferences({ sections }),
   );
+  response.set("Cache-Control", "no-store");
   response.json({
     slug: page.slug,
+    serverTime: new Date().toISOString(),
     siteTitle: snapshot.siteTitle,
     seoDescription: snapshot.seoDescription,
     publishedAt: page.publishedAt,

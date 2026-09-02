@@ -78,6 +78,7 @@ const orderLineSchema = v.object({
   sourceId: requiredText(80),
   variantId: v.optional(v.nullable(variantId), null),
   quantity: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(99)),
+  expectedUnitPrice: v.optional(nonNegativeNumber),
 });
 
 export const publicOrderSchema = v.pipe(
@@ -99,6 +100,7 @@ export const publicOrderSchema = v.pipe(
     paymentMethod: v.picklist(["PAY_ON_PICKUP", "CASH_ON_DELIVERY"]),
     items: v.pipe(v.array(orderLineSchema), v.minLength(1), v.maxLength(30)),
     customerNotes: optionalText(1_000),
+    expectedTotal: v.optional(nonNegativeNumber),
   }),
   v.check(
     (order) => order.fulfillmentMethod !== "DELIVERY" || order.deliveryAddress.length >= 5,

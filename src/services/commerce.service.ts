@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import mongoose, { type Types } from "mongoose";
 import * as v from "valibot";
+import { catalogPrice } from "../lib/catalog-pricing.js";
 import { decimal, moneyString } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
 import { Business, CatalogProduct, CustomerOrder, LandingPage, MenuItem } from "../models/index.js";
@@ -9,6 +10,7 @@ import {
   defaultLandingPageCommerceSettings,
   landingPageCommerceSettingsSchema,
 } from "../validation/landing-page.js";
+import { enabledDiscounts, priceCatalogProducts } from "./catalog-discount.service.js";
 
 export type CatalogItemReference = { sourceType: "MENU_ITEM" | "PRODUCT"; sourceId: string };
 
@@ -61,12 +63,17 @@ function publicProduct(product: any) {
     category: product.category ?? "",
     productType: product.productType,
     mediaUrls: product.mediaUrls ?? [],
-    price: product.basePrice,
+    price: product.price ?? product.basePrice,
+    originalPrice: product.originalPrice,
+    discountedPrice: product.discountedPrice,
+    discount: product.discount,
     variants: (product.variants ?? []).map((variant: any) => ({
       variantId: variant.variantId,
       name: variant.name,
       attributes: variant.attributes ?? [],
-      price: variant.price,
+      price: variant.effectivePrice ?? variant.price,
+      originalPrice: variant.originalPrice,
+      discountedPrice: variant.discountedPrice,
       isAvailable:
         variant.isAvailable === true &&
         (variant.availableQuantity === null || Number(variant.availableQuantity) > 0),
@@ -86,7 +93,8 @@ export async function getBuilderCatalogItems(businessId: Types.ObjectId) {
       .lean(),
     CatalogProduct.find({ businessId, isActive: true }).sort({ name: 1 }).lean(),
   ]);
-  return [...menus.map(publicMenuItem), ...products.map(publicProduct)].sort((left, right) =>
+  const pricedProducts = await priceCatalogProducts(businessId, products);
+  return [...menus.map(publicMenuItem), ...pricedProducts.map(publicProduct)].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
 }
@@ -110,8 +118,12 @@ export async function getPublicCatalogItems(
       .lean(),
     CatalogProduct.find({ _id: { $in: productIds }, businessId, isActive: true }).lean(),
   ]);
+  const pricedProducts = await priceCatalogProducts(businessId, products);
   const resolved = new Map(
-    [...menus.map(publicMenuItem), ...products.map(publicProduct)].map((item) => [item.key, item]),
+    [...menus.map(publicMenuItem), ...pricedProducts.map(publicProduct)].map((item) => [
+      item.key,
+      item,
+    ]),
   );
   return [...unique.keys()].flatMap((key) => {
     const item = resolved.get(key);
@@ -245,6 +257,8 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
     }),
   ]);
 
+  const discounts = await enabledDiscounts(page.businessId, productIds);
+  const pricingTime = new Date();
   const orderItems = lines.map((line) => {
     if (line.sourceType === "MENU_ITEM") {
       const menu = menus.find((candidate) => candidate.id === line.sourceId);
@@ -288,7 +302,9 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
       Number(product.availableQuantity) < line.quantity
     )
       throw new HttpError(422, `${product.name} is unavailable in the requested quantity`);
-    const price = decimal(variant?.price?.toString() ?? product.basePrice?.toString());
+    const promotion = discounts.get(String(product._id));
+    const pricing = catalogPrice(variant?.price ?? product.basePrice, promotion, pricingTime);
+    const price = decimal(pricing.price);
     return {
       sourceType: line.sourceType,
       sourceId: product._id,
@@ -298,17 +314,50 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
       variantSnapshot: variant?.name ?? "",
       mediaUrlSnapshot: product.mediaUrls?.[0] ?? "",
       unitPrice: price.toString(),
+      originalUnitPrice: pricing.originalPrice,
+      discountAmount: pricing.discountAmount,
+      discountSnapshot: pricing.active
+        ? {
+            promotionId: promotion._id,
+            name: promotion.name,
+            type: promotion.type,
+            value: promotion.value,
+          }
+        : null,
       quantity: line.quantity,
       lineTotal: price.times(line.quantity).toString(),
     };
   });
 
   const subtotal = orderItems.reduce((total, item) => total.plus(item.lineTotal), decimal(0));
-  if (subtotal.lessThan(commerce.minimumOrder))
-    throw new HttpError(422, `Minimum order is ${moneyString(decimal(commerce.minimumOrder))}`);
   const deliveryFee =
     input.fulfillmentMethod === "DELIVERY" ? decimal(commerce.deliveryFee) : decimal(0);
   const total = subtotal.plus(deliveryFee);
+  const changedPrice = orderItems.some((item, index) => {
+    const expected = lines[index]?.expectedUnitPrice;
+    return (
+      (item.sourceType === "PRODUCT" && expected === undefined) ||
+      (expected !== undefined && !decimal(expected).equals(decimal(item.unitPrice)))
+    );
+  });
+  if (
+    changedPrice ||
+    (input.expectedTotal !== undefined && !decimal(moneyString(input.expectedTotal)).equals(total))
+  ) {
+    throw new HttpError(
+      409,
+      "Prices changed. Review the updated cart and submit again.",
+      {
+        items: orderItems,
+        subtotal: moneyString(subtotal),
+        deliveryFee: moneyString(deliveryFee),
+        total: moneyString(total),
+      },
+      "PRICES_CHANGED",
+    );
+  }
+  if (subtotal.lessThan(commerce.minimumOrder))
+    throw new HttpError(422, `Minimum order is ${moneyString(decimal(commerce.minimumOrder))}`);
   try {
     const order = await CustomerOrder.create({
       businessId: page.businessId,

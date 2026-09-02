@@ -164,10 +164,32 @@ Business routes require an approved account and an access token in the `Authoriz
 | `/api/employees` | Highest-role employee, role, and invite management |
 | `/api/invites` | Opaque-link status and invited-user registration |
 | `/api/landing-page` | Owner-only landing-page sections, variants, settings, and publishing |
-| `/api/catalog` | Owner-only clothing, merchandise, and general product catalog |
+| `/api/catalog` | Owner-only product catalog and scheduled bulk promotions |
 | `/api/orders` | Owner-only pending-order review and fulfillment status workflow |
 | `/api/public/landing-pages/:slug` | Public published snapshot and available menu content |
 | `/api/public/landing-pages/:slug/orders` | Rate-limited guest checkout for published products |
+
+### Catalog promotions and checkout pricing
+
+`GET/POST /api/catalog/discounts`, `PUT /api/catalog/discounts/:id`, and
+`PATCH /api/catalog/discounts/:id/status` manage business-scoped promotions. The status
+payload is `{ "isEnabled": false }` to deactivate, or `true` to reactivate within its schedule.
+Promotion inputs include `name`, `type` (`PERCENTAGE` or `FIXED`), `value`, `productIds`,
+`startsAt`, `endsAt` (ISO timestamps), and `isEnabled`.
+
+One enabled promotion may reference a product at a time. A unique partial index on
+`CatalogDiscount` protects concurrent assignments; the existing startup index creation
+installs it. Expired assignments are released when saving another promotion. Activation
+and expiry are calculated from server time, so they require no scheduled worker or republish.
+Fixed discounts apply per unit, including each variant; reductions are capped at the price.
+Base prices are preserved, and orders store original and discounted prices plus the promotion snapshot.
+
+Public catalog responses include `originalPrice`, `discountedPrice`, effective `price`, and
+schedule metadata. Owner variant `price` remains its editable original price.
+Product checkout lines must send `expectedUnitPrice`; the updated storefront also sends
+`expectedTotal`. Stale or missing product prices return `409 PRICES_CHANGED` with updated
+totals, without creating an order. The client must review and resubmit. Deploy the matching
+frontend and backend together. Existing completed requests remain idempotent.
 
 ### Transaction operations
 
