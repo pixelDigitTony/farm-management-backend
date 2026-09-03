@@ -30,6 +30,7 @@ const width = v.optional(v.picklist(["FULL", "TWO_THIRDS", "HALF", "THIRD"]), "F
 const enabled = v.optional(v.boolean(), true);
 const color = v.pipe(v.string(), v.regex(/^#[0-9a-fA-F]{6}$/));
 const inheritedColor = v.optional(v.union([v.literal(""), color]), "");
+const displayMode = v.optional(v.picklist(["VERTICAL", "HORIZONTAL"]), "VERTICAL");
 
 const heroComponent = v.object({
   id: componentId,
@@ -69,6 +70,7 @@ const menuComponent = v.object({
     heading: requiredText(120),
     body: shortText(500),
     menuItemIds: v.pipe(v.array(v.string()), v.maxLength(12)),
+    displayMode,
     columns: v.optional(v.picklist([2, 3, 4]), 3),
   }),
 });
@@ -95,6 +97,7 @@ const catalogComponent = v.object({
         "Select each catalog item once",
       ),
     ),
+    displayMode,
     columns: v.optional(v.picklist([2, 3, 4]), 3),
   }),
 });
@@ -165,6 +168,10 @@ export const landingPageSectionSchema = v.object({
   contentWidth: v.optional(v.picklist(["FULL", "WIDE", "CONTAINED"]), "WIDE"),
   padding: v.optional(v.picklist(["NONE", "SMALL", "MEDIUM", "LARGE"]), "MEDIUM"),
   gap: v.optional(v.picklist(["NONE", "SMALL", "MEDIUM", "LARGE"]), "MEDIUM"),
+  maxHeight: v.optional(
+    v.pipe(v.number(), v.finite(), v.integer(), v.minValue(0), v.maxValue(3000)),
+    0,
+  ),
   components: v.pipe(v.array(landingPageComponentSchema), v.maxLength(30)),
 });
 

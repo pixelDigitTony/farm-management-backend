@@ -1,6 +1,7 @@
 import { parse } from "valibot";
 import { describe, expect, it } from "vitest";
 import {
+  landingPageSectionSchema,
   landingPageSettingsSchema,
   landingPageVariantUpdateSchema,
 } from "../src/validation/landing-page.js";
@@ -50,6 +51,46 @@ function variant() {
 }
 
 describe("landing-page validation", () => {
+  it("preserves scroll settings and defaults older sections to unlimited vertical grids", () => {
+    const section = {
+      ...variant().sections[0],
+      maxHeight: 480,
+      components: [
+        {
+          id: "menu",
+          type: "MENU",
+          content: { heading: "Menu", body: "", menuItemIds: [], displayMode: "HORIZONTAL" },
+        },
+        {
+          id: "catalog",
+          type: "CATALOG",
+          content: { heading: "Products", body: "", catalogItemRefs: [] },
+        },
+      ],
+    };
+    const parsed = parse(landingPageSectionSchema, section);
+    expect(parsed.maxHeight).toBe(480);
+    expect(parsed.components.map((component) => component.content)).toMatchObject([
+      { displayMode: "HORIZONTAL" },
+      { displayMode: "VERTICAL" },
+    ]);
+    expect(parse(landingPageSectionSchema, { ...section, maxHeight: undefined }).maxHeight).toBe(0);
+    for (const maxHeight of [-1, 3001, 1.5, Infinity, "480"]) {
+      expect(() => parse(landingPageSectionSchema, { ...section, maxHeight })).toThrow();
+    }
+    expect(() =>
+      parse(landingPageSectionSchema, {
+        ...section,
+        components: [
+          {
+            ...section.components[0],
+            content: { ...section.components[0]?.content, displayMode: "DIAGONAL" },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("accepts a responsive component variant and safe action links", () => {
     const result = parse(landingPageVariantUpdateSchema, variant());
     expect(result.sections[0]?.components[0]?.type).toBe("HERO");

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import mongoose from "mongoose";
 import * as v from "valibot";
@@ -16,6 +15,7 @@ import {
   getPublicCatalogItems,
   selectedCatalogReferences,
 } from "../services/commerce.service.js";
+import { createSection, defaultLandingSections } from "../services/landing-page-template.js";
 import {
   defaultLandingPageCommerceSettings,
   type LandingPageVariantInput,
@@ -36,88 +36,6 @@ const defaultTheme = {
   fontStyle: "CLASSIC",
   buttonStyle: "ROUNDED",
 };
-
-function defaultComponents(business: any) {
-  const businessName = business.businessName || "Our business";
-  return [
-    {
-      id: randomUUID(),
-      type: "HERO",
-      enabled: true,
-      width: "FULL",
-      content: {
-        eyebrow: "Piggery & Karenderiya",
-        title: businessName,
-        body: "Fresh local food and responsibly raised products from our family business.",
-        mediaUrl: "",
-        primaryLabel: "View our menu",
-        primaryUrl: "#menu",
-        secondaryLabel: "Contact us",
-        secondaryUrl: "#contact",
-      },
-    },
-    {
-      id: randomUUID(),
-      type: "TEXT",
-      enabled: true,
-      width: "FULL",
-      content: {
-        heading: "From our farm to your table",
-        body: "Tell customers what makes your piggery and karenderiya special.",
-        alignment: "CENTER",
-      },
-    },
-    {
-      id: randomUUID(),
-      type: "MENU",
-      enabled: true,
-      width: "FULL",
-      content: { heading: "Featured menu", body: "", menuItemIds: [], columns: 3 },
-    },
-    {
-      id: randomUUID(),
-      type: "CONTACT",
-      enabled: true,
-      width: "FULL",
-      content: {
-        heading: "Visit or contact us",
-        body: "",
-        address: business.karenderiya?.address || business.piggery?.address || "",
-        phone: "",
-        email: "",
-        hours: "",
-        facebookUrl: "",
-        instagramUrl: "",
-        mapUrl: "",
-      },
-    },
-  ];
-}
-
-function createSection(name: string, components: unknown[], options: Record<string, unknown> = {}) {
-  return {
-    id: randomUUID(),
-    name,
-    enabled: true,
-    backgroundColor: "",
-    textColor: "",
-    contentWidth: "WIDE",
-    padding: "MEDIUM",
-    gap: "MEDIUM",
-    components,
-    ...options,
-  };
-}
-
-function defaultSections(business: any) {
-  const components = defaultComponents(business);
-  return [
-    createSection("Welcome", components.slice(0, 1), { padding: "LARGE" }),
-    createSection("Our story", components.slice(1, 2)),
-    createSection("Featured menu", components.slice(2, 3), { padding: "LARGE" }),
-    createSection("Contact", components.slice(3, 4), { padding: "LARGE" }),
-  ];
-}
 
 function normalizedSections(source: { sections?: unknown; components?: unknown }) {
   if (Array.isArray(source.sections) && source.sections.length) return source.sections;
@@ -246,7 +164,7 @@ landingPageRouter.post("/", async (request, response) => {
       name: "Main",
       theme: defaultTheme,
       commerce: defaultLandingPageCommerceSettings,
-      sections: defaultSections(business),
+      sections: defaultLandingSections(business, await getBuilderCatalogItems(owner.businessId)),
       createdByUserId: owner.userId,
       updatedByUserId: owner.userId,
     });
@@ -293,7 +211,10 @@ landingPageRouter.post("/variants", async (request, response) => {
     commerce: duplicate?.commerce ?? defaultLandingPageCommerceSettings,
     sections: duplicate
       ? normalizedSections(duplicate)
-      : defaultSections(await Business.findById(owner.businessId).lean()),
+      : defaultLandingSections(
+          await Business.findById(owner.businessId).lean(),
+          await getBuilderCatalogItems(owner.businessId),
+        ),
     createdByUserId: owner.userId,
     updatedByUserId: owner.userId,
   });
