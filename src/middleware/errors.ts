@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import mongoose from "mongoose";
 import { ValiError } from "valibot";
+import { DomainValidationError } from "../lib/domain-error.js";
 import { HttpError } from "../lib/http-error.js";
 
 export function notFound(request: Request, _response: Response, next: NextFunction) {
@@ -13,6 +14,10 @@ export function errorHandler(
   response: Response,
   _next: NextFunction,
 ) {
+  if (error instanceof DomainValidationError)
+    return response.status(422).json({ message: error.message });
+  if (error instanceof mongoose.Error.CastError)
+    return response.status(422).json({ message: "Invalid record field or identifier" });
   if (error instanceof ValiError) {
     return response.status(422).json({ message: "Validation failed", issues: error.issues });
   }

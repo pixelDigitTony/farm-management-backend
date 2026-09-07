@@ -2,6 +2,7 @@ import type { Types } from "mongoose";
 import type { InferOutput } from "valibot";
 import { decimal, moneyString } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
+import { inTransaction } from "../lib/transaction.js";
 import {
   CashAccount,
   CashTransaction,
@@ -22,7 +23,7 @@ import { calculateRecipeIngredientUsage } from "./calculation.service.js";
 
 type CashInput = InferOutput<typeof cashOperationSchema>;
 
-export async function postCash(
+async function postCashInTransaction(
   businessId: Types.ObjectId,
   input: CashInput,
   source?: { collection: string; documentId: Types.ObjectId },
@@ -135,7 +136,7 @@ async function reverseCashTransaction(businessId: Types.ObjectId, transactionId:
   await transaction.save();
 }
 
-export async function reverseExpenseCashWithoutExpense(
+async function reverseExpenseCashWithoutExpenseInTransaction(
   businessId: Types.ObjectId,
   expenseId: Types.ObjectId,
 ) {
@@ -148,7 +149,7 @@ export async function reverseExpenseCashWithoutExpense(
   if (transaction) await reverseCashTransaction(businessId, transaction._id);
 }
 
-export async function postExpense(
+async function postExpenseInTransaction(
   businessId: Types.ObjectId,
   input: InferOutput<typeof expenseOperationSchema>,
 ) {
@@ -183,29 +184,24 @@ export async function postExpense(
     status: "POSTED",
   });
   if (input.amountPaid > 0) {
-    try {
-      await postCash(
-        businessId,
-        {
-          transactionDate: input.expenseDate,
-          businessUnit: input.businessUnit,
-          transactionType: "CASH_OUT",
-          category: "EXPENSE_PAYMENT",
-          amount: input.amountPaid,
-          accountId: input.accountId,
-          description: input.description,
-        },
-        { collection: "expenses", documentId: expense._id },
-      );
-    } catch (error) {
-      await expense.deleteOne();
-      throw error;
-    }
+    await postCash(
+      businessId,
+      {
+        transactionDate: input.expenseDate,
+        businessUnit: input.businessUnit,
+        transactionType: "CASH_OUT",
+        category: "EXPENSE_PAYMENT",
+        amount: input.amountPaid,
+        accountId: input.accountId,
+        description: input.description,
+      },
+      { collection: "expenses", documentId: expense._id },
+    );
   }
   return expense;
 }
 
-export async function updateExpense(
+async function updateExpenseInTransaction(
   businessId: Types.ObjectId,
   expenseId: string,
   input: InferOutput<typeof expenseOperationSchema>,
@@ -269,7 +265,7 @@ export async function updateExpense(
   return expense;
 }
 
-export async function deleteExpense(businessId: Types.ObjectId, expenseId: string) {
+async function deleteExpenseInTransaction(businessId: Types.ObjectId, expenseId: string) {
   const expense = await Expense.findOne({ _id: expenseId, businessId });
   if (!expense) throw new HttpError(404, "Expense was not found");
   const transaction = await CashTransaction.findOne({
@@ -282,7 +278,7 @@ export async function deleteExpense(businessId: Types.ObjectId, expenseId: strin
   await expense.deleteOne();
 }
 
-export async function postKarenderiyaSale(
+async function postKarenderiyaSaleInTransaction(
   businessId: Types.ObjectId,
   input: InferOutput<typeof karenderiyaSaleOperationSchema>,
 ) {
@@ -419,126 +415,98 @@ export async function postKarenderiyaSale(
     notes: input.notes,
     status: "DRAFT",
   });
-  const changedItems: Array<{ id: Types.ObjectId; quantity: string }> = [];
-  const changedBatches: Array<{ id: Types.ObjectId; quantity: number }> = [];
-  const movementIds: Types.ObjectId[] = [];
-  let transactionId: Types.ObjectId | undefined;
-  try {
-    for (const line of input.items) {
-      if (!line.cookingBatchId) continue;
-      const batch = batches.find((candidate) => candidate.id === line.cookingBatchId);
-      if (!batch) throw new HttpError(422, "Cooking batch was not found");
-      const updated = await CookingBatch.findOneAndUpdate(
-        {
-          _id: batch._id,
-          businessId,
-          status: "COMPLETED",
-          servingsRemainingCached: { $gte: line.quantitySold },
-        },
-        {
-          $inc: {
-            servingsSoldCached: line.quantitySold,
-            servingsRemainingCached: -line.quantitySold,
-          },
-        },
-        { new: true },
-      );
-      if (!updated)
-        throw new HttpError(422, `Not enough remaining servings in ${batch.cookingBatchNumber}`);
-      changedBatches.push({ id: batch._id, quantity: line.quantitySold });
-    }
-    const usages = [];
-    let movementIndex = 0;
-    for (const [id, requirement] of requirements) {
-      const item = inventoryItems.find((candidate) => candidate.id === id);
-      if (!item) throw new HttpError(422, "Recipe ingredient was not found");
-      const quantity = requirement.quantity.toString();
-      const updated = await InventoryItem.findOneAndUpdate(
-        { _id: item._id, businessId, currentStockCached: { $gte: quantity } },
-        { $inc: { currentStockCached: requirement.quantity.negated().toString() } },
-        { new: true },
-      );
-      if (!updated) throw new HttpError(422, `Not enough ${item.name} in inventory`);
-      changedItems.push({ id: item._id, quantity });
-      const unitCost = decimal(
-        item.defaultKarenderiyaTransferPricePerUnit?.toString() ??
-          item.defaultExternalPricePerUnit?.toString() ??
-          0,
-      );
-      const totalUsageCost = unitCost.times(requirement.quantity);
-      const movement = await InventoryMovement.create({
-        businessId,
-        movementNumber: `KCON-${Date.now()}-${movementIndex++}-${Math.floor(Math.random() * 1000)}`,
-        movementDate: input.salesDate,
-        movementType: "CONSUMPTION",
-        itemId: item._id,
-        fromBusinessUnit: "KARENDERIYA",
-        toBusinessUnit: null,
-        quantity,
-        unit: item.baseUnit,
-        unitCostSnapshot: unitCost.toString(),
-        totalCost: totalUsageCost.toString(),
-        allocations: [
-          { targetType: "GENERAL", quantity, allocatedCost: totalUsageCost.toString() },
-        ],
-        source: { collection: "karenderiya_sales", documentId: sale._id },
-        reason: `Ingredients used by ${sale.salesNumber}`,
-        status: "POSTED",
-      });
-      movementIds.push(movement._id);
-      usages.push({
-        inventoryItemId: item._id,
-        itemNameSnapshot: item.name,
-        quantityUsed: quantity,
-        unit: item.baseUnit,
-        unitCostSnapshot: unitCost.toString(),
-        totalCost: totalUsageCost.toString(),
-        inventoryMovementId: movement._id,
-      });
-    }
-    const transaction = await postCash(
-      businessId,
+
+  for (const line of input.items) {
+    if (!line.cookingBatchId) continue;
+    const batch = batches.find((candidate) => candidate.id === line.cookingBatchId);
+    if (!batch) throw new HttpError(422, "Cooking batch was not found");
+    const updated = await CookingBatch.findOneAndUpdate(
       {
-        transactionDate: input.salesDate,
-        businessUnit: "KARENDERIYA",
-        transactionType: "CASH_IN",
-        category: "SALE_COLLECTION",
-        amount: Number(moneyString(netSales)),
-        accountId: input.receivingAccountId,
-        description: `Karenderiya order ${sale.salesNumber}`,
+        _id: batch._id,
+        businessId,
+        status: "COMPLETED",
+        servingsRemainingCached: { $gte: line.quantitySold },
       },
-      { collection: "karenderiya_sales", documentId: sale._id },
-    );
-    transactionId = transaction._id;
-    sale.ingredientUsages = usages;
-    sale.cashTransactionId = transaction._id;
-    sale.status = "POSTED";
-    await sale.save();
-    return sale;
-  } catch (error) {
-    if (transactionId) await reverseCashTransaction(businessId, transactionId);
-    for (const changed of changedItems)
-      await InventoryItem.updateOne(
-        { _id: changed.id, businessId },
-        { $inc: { currentStockCached: changed.quantity } },
-      );
-    if (movementIds.length) await InventoryMovement.deleteMany({ _id: { $in: movementIds } });
-    for (const batch of changedBatches)
-      await CookingBatch.updateOne(
-        { _id: batch.id, businessId },
-        {
-          $inc: {
-            servingsSoldCached: -batch.quantity,
-            servingsRemainingCached: batch.quantity,
-          },
+      {
+        $inc: {
+          servingsSoldCached: line.quantitySold,
+          servingsRemainingCached: -line.quantitySold,
         },
-      );
-    await sale.deleteOne();
-    throw error;
+      },
+      { new: true },
+    );
+    if (!updated)
+      throw new HttpError(422, `Not enough remaining servings in ${batch.cookingBatchNumber}`);
   }
+  const usages = [];
+  let movementIndex = 0;
+  for (const [id, requirement] of requirements) {
+    const item = inventoryItems.find((candidate) => candidate.id === id);
+    if (!item) throw new HttpError(422, "Recipe ingredient was not found");
+    const quantity = requirement.quantity.toString();
+    const updated = await InventoryItem.findOneAndUpdate(
+      { _id: item._id, businessId, currentStockCached: { $gte: quantity } },
+      { $inc: { currentStockCached: requirement.quantity.negated().toString() } },
+      { new: true },
+    );
+    if (!updated) throw new HttpError(422, `Not enough ${item.name} in inventory`);
+
+    const unitCost = decimal(
+      item.defaultKarenderiyaTransferPricePerUnit?.toString() ??
+        item.defaultExternalPricePerUnit?.toString() ??
+        0,
+    );
+    const totalUsageCost = unitCost.times(requirement.quantity);
+    const movement = await InventoryMovement.create({
+      businessId,
+      movementNumber: `KCON-${Date.now()}-${movementIndex++}-${Math.floor(Math.random() * 1000)}`,
+      movementDate: input.salesDate,
+      movementType: "CONSUMPTION",
+      itemId: item._id,
+      fromBusinessUnit: "KARENDERIYA",
+      toBusinessUnit: null,
+      quantity,
+      unit: item.baseUnit,
+      unitCostSnapshot: unitCost.toString(),
+      totalCost: totalUsageCost.toString(),
+      allocations: [{ targetType: "GENERAL", quantity, allocatedCost: totalUsageCost.toString() }],
+      source: { collection: "karenderiya_sales", documentId: sale._id },
+      reason: `Ingredients used by ${sale.salesNumber}`,
+      status: "POSTED",
+    });
+
+    usages.push({
+      inventoryItemId: item._id,
+      itemNameSnapshot: item.name,
+      quantityUsed: quantity,
+      unit: item.baseUnit,
+      unitCostSnapshot: unitCost.toString(),
+      totalCost: totalUsageCost.toString(),
+      inventoryMovementId: movement._id,
+    });
+  }
+  const transaction = await postCash(
+    businessId,
+    {
+      transactionDate: input.salesDate,
+      businessUnit: "KARENDERIYA",
+      transactionType: "CASH_IN",
+      category: "SALE_COLLECTION",
+      amount: Number(moneyString(netSales)),
+      accountId: input.receivingAccountId,
+      description: `Karenderiya order ${sale.salesNumber}`,
+    },
+    { collection: "karenderiya_sales", documentId: sale._id },
+  );
+
+  sale.ingredientUsages = usages;
+  sale.cashTransactionId = transaction._id;
+  sale.status = "POSTED";
+  await sale.save();
+  return sale;
 }
 
-export async function updateKarenderiyaSale(
+async function updateKarenderiyaSaleInTransaction(
   businessId: Types.ObjectId,
   saleId: string,
   input: { salesDate: Date; notes?: string },
@@ -548,20 +516,18 @@ export async function updateKarenderiyaSale(
   sale.salesDate = input.salesDate;
   sale.notes = input.notes;
   await sale.save();
-  await Promise.all([
-    CashTransaction.updateOne(
-      { _id: sale.cashTransactionId, businessId, status: "POSTED" },
-      { transactionDate: input.salesDate },
-    ),
-    InventoryMovement.updateMany(
-      { _id: { $in: sale.ingredientUsages.map((usage: any) => usage.inventoryMovementId) } },
-      { movementDate: input.salesDate },
-    ),
-  ]);
+  await CashTransaction.updateOne(
+    { _id: sale.cashTransactionId, businessId, status: "POSTED" },
+    { transactionDate: input.salesDate },
+  );
+  await InventoryMovement.updateMany(
+    { _id: { $in: sale.ingredientUsages.map((usage: any) => usage.inventoryMovementId) } },
+    { movementDate: input.salesDate },
+  );
   return sale;
 }
 
-export async function deleteKarenderiyaSale(businessId: Types.ObjectId, saleId: string) {
+async function deleteKarenderiyaSaleInTransaction(businessId: Types.ObjectId, saleId: string) {
   const sale = await KarenderiyaSale.findOne({ _id: saleId, businessId, status: "POSTED" });
   if (!sale) throw new HttpError(404, "Order transaction was not found");
   if (sale.cashTransactionId) await reverseCashTransaction(businessId, sale.cashTransactionId);
@@ -587,3 +553,30 @@ export async function deleteKarenderiyaSale(businessId: Types.ObjectId, saleId: 
   sale.status = "VOIDED";
   await sale.save();
 }
+
+export const postCash = (...args: Parameters<typeof postCashInTransaction>) =>
+  inTransaction(() => postCashInTransaction(...args));
+
+export const reverseExpenseCashWithoutExpense = (
+  ...args: Parameters<typeof reverseExpenseCashWithoutExpenseInTransaction>
+) => inTransaction(() => reverseExpenseCashWithoutExpenseInTransaction(...args));
+
+export const postExpense = (...args: Parameters<typeof postExpenseInTransaction>) =>
+  inTransaction(() => postExpenseInTransaction(...args));
+
+export const updateExpense = (...args: Parameters<typeof updateExpenseInTransaction>) =>
+  inTransaction(() => updateExpenseInTransaction(...args));
+
+export const deleteExpense = (...args: Parameters<typeof deleteExpenseInTransaction>) =>
+  inTransaction(() => deleteExpenseInTransaction(...args));
+
+export const postKarenderiyaSale = (...args: Parameters<typeof postKarenderiyaSaleInTransaction>) =>
+  inTransaction(() => postKarenderiyaSaleInTransaction(...args));
+
+export const updateKarenderiyaSale = (
+  ...args: Parameters<typeof updateKarenderiyaSaleInTransaction>
+) => inTransaction(() => updateKarenderiyaSaleInTransaction(...args));
+
+export const deleteKarenderiyaSale = (
+  ...args: Parameters<typeof deleteKarenderiyaSaleInTransaction>
+) => inTransaction(() => deleteKarenderiyaSaleInTransaction(...args));

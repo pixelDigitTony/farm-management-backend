@@ -8,6 +8,7 @@ import {
 } from "../lib/auth-utils.js";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
+import { credentialChangeLimiter } from "../middleware/rate-limit.js";
 import { AuthSession, Business, SlaughterSetting, User } from "../models/index.js";
 import { issueVerificationEmail } from "../services/email-verification.service.js";
 import {
@@ -62,6 +63,7 @@ const slaughterSettingsSchema = v.object({
 });
 
 export const settingsRouter = Router();
+settingsRouter.use("/account", credentialChangeLimiter);
 
 settingsRouter.get("/", async (request, response) => {
   const owner = getOwner(request);

@@ -1,6 +1,7 @@
 import * as v from "valibot";
+import { isCalendarDate } from "../lib/business-date.js";
 
-const calendarDate = v.pipe(v.string(), v.regex(/^\d{4}-\d{2}-\d{2}$/));
+const calendarDate = v.pipe(v.string(), v.check(isCalendarDate, "Use a valid calendar date"));
 const time = v.pipe(v.string(), v.regex(/^([01]\d|2[0-3]):[0-5]\d$/));
 const title = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(120));
 const notes = v.pipe(v.string(), v.trim(), v.maxLength(1_000));

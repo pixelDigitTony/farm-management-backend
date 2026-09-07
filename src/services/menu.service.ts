@@ -1,6 +1,7 @@
 import type { Types } from "mongoose";
 import type { InferOutput } from "valibot";
 import { HttpError } from "../lib/http-error.js";
+import { inTransaction } from "../lib/transaction.js";
 import { InventoryItem, MenuItem, Recipe } from "../models/index.js";
 import type { menuRecipeOperationSchema } from "../validation/operations.js";
 
@@ -17,23 +18,22 @@ async function validateIngredients(businessId: Types.ObjectId, input: MenuRecipe
     throw new HttpError(422, "One or more recipe ingredients are unavailable");
 }
 
-export async function createMenuWithRecipe(businessId: Types.ObjectId, input: MenuRecipeInput) {
+async function createMenuWithRecipeInTransaction(
+  businessId: Types.ObjectId,
+  input: MenuRecipeInput,
+) {
   await validateIngredients(businessId, input);
   const recipe = await Recipe.create({ ...input.recipe, businessId });
-  try {
-    const menu = await MenuItem.create({
-      ...input.menu,
-      businessId,
-      recipeId: recipe._id,
-    });
-    return { recipe, menu };
-  } catch (error) {
-    await recipe.deleteOne();
-    throw error;
-  }
+
+  const menu = await MenuItem.create({
+    ...input.menu,
+    businessId,
+    recipeId: recipe._id,
+  });
+  return { recipe, menu };
 }
 
-export async function updateMenuWithRecipe(
+async function updateMenuWithRecipeInTransaction(
   businessId: Types.ObjectId,
   menuId: string,
   input: MenuRecipeInput,
@@ -43,16 +43,19 @@ export async function updateMenuWithRecipe(
   if (!menu) throw new HttpError(404, "Menu item was not found");
   const recipe = await Recipe.findOne({ _id: menu.recipeId, businessId, isActive: true });
   if (!recipe) throw new HttpError(404, "Menu recipe was not found");
-  const previousRecipe = recipe.toObject();
+
   recipe.set(input.recipe);
   await recipe.save();
-  try {
-    menu.set({ ...input.menu, recipeId: recipe._id });
-    await menu.save();
-    return { recipe, menu };
-  } catch (error) {
-    recipe.overwrite(previousRecipe);
-    await recipe.save();
-    throw error;
-  }
+
+  menu.set({ ...input.menu, recipeId: recipe._id });
+  await menu.save();
+  return { recipe, menu };
 }
+
+export const createMenuWithRecipe = (
+  ...args: Parameters<typeof createMenuWithRecipeInTransaction>
+) => inTransaction(() => createMenuWithRecipeInTransaction(...args));
+
+export const updateMenuWithRecipe = (
+  ...args: Parameters<typeof updateMenuWithRecipeInTransaction>
+) => inTransaction(() => updateMenuWithRecipeInTransaction(...args));

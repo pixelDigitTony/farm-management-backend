@@ -4,6 +4,7 @@ import * as v from "valibot";
 import { catalogPrice } from "../lib/catalog-pricing.js";
 import { decimal, moneyString } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
+import { inTransaction } from "../lib/transaction.js";
 import { Business, CatalogProduct, CustomerOrder, LandingPage, MenuItem } from "../models/index.js";
 import type { CatalogProductInput, PublicOrderInput } from "../validation/commerce.js";
 import {
@@ -391,73 +392,61 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
 }
 
 async function reserveOrderStock(order: any) {
-  const changed: Array<{ productId: Types.ObjectId; variantId?: string; quantity: number }> = [];
-  try {
-    for (const item of order.items) {
-      if (item.sourceType === "MENU_ITEM") {
-        const available = await MenuItem.exists({
-          _id: item.sourceId,
-          businessId: order.businessId,
-          isActive: true,
-          isAvailable: true,
-        });
-        if (!available) throw new HttpError(422, `${item.nameSnapshot} is no longer available`);
-        continue;
-      }
-      const product = await CatalogProduct.findOne({
+  for (const item of order.items) {
+    if (item.sourceType === "MENU_ITEM") {
+      const available = await MenuItem.exists({
         _id: item.sourceId,
         businessId: order.businessId,
         isActive: true,
-        isOrderable: true,
+        isAvailable: true,
       });
-      if (!product) throw new HttpError(422, `${item.nameSnapshot} is no longer available`);
-      if (item.variantId) {
-        const variant = product.variants.find(
-          (candidate: any) => candidate.variantId === item.variantId,
-        );
-        if (!variant?.isAvailable)
-          throw new HttpError(422, `${item.nameSnapshot} ${item.variantSnapshot} is unavailable`);
-        if (variant.availableQuantity !== null) {
-          const updated = await CatalogProduct.updateOne(
-            {
-              _id: product._id,
-              businessId: order.businessId,
-              variants: {
-                $elemMatch: {
-                  variantId: item.variantId,
-                  isAvailable: true,
-                  availableQuantity: { $gte: item.quantity },
-                },
-              },
-            },
-            { $inc: { "variants.$[variant].availableQuantity": -item.quantity } },
-            { arrayFilters: [{ "variant.variantId": item.variantId }] },
-          );
-          if (!updated.modifiedCount)
-            throw new HttpError(422, `${item.nameSnapshot} is unavailable in that quantity`);
-          changed.push({
-            productId: product._id,
-            variantId: item.variantId,
-            quantity: item.quantity,
-          });
-        }
-      } else if (product.availableQuantity !== null) {
+      if (!available) throw new HttpError(422, `${item.nameSnapshot} is no longer available`);
+      continue;
+    }
+    const product = await CatalogProduct.findOne({
+      _id: item.sourceId,
+      businessId: order.businessId,
+      isActive: true,
+      isOrderable: true,
+    });
+    if (!product) throw new HttpError(422, `${item.nameSnapshot} is no longer available`);
+    if (item.variantId) {
+      const variant = product.variants.find(
+        (candidate: any) => candidate.variantId === item.variantId,
+      );
+      if (!variant?.isAvailable)
+        throw new HttpError(422, `${item.nameSnapshot} ${item.variantSnapshot} is unavailable`);
+      if (variant.availableQuantity !== null) {
         const updated = await CatalogProduct.updateOne(
           {
             _id: product._id,
             businessId: order.businessId,
-            availableQuantity: { $gte: item.quantity },
+            variants: {
+              $elemMatch: {
+                variantId: item.variantId,
+                isAvailable: true,
+                availableQuantity: { $gte: item.quantity },
+              },
+            },
           },
-          { $inc: { availableQuantity: -item.quantity } },
+          { $inc: { "variants.$[variant].availableQuantity": -item.quantity } },
+          { arrayFilters: [{ "variant.variantId": item.variantId }] },
         );
         if (!updated.modifiedCount)
           throw new HttpError(422, `${item.nameSnapshot} is unavailable in that quantity`);
-        changed.push({ productId: product._id, quantity: item.quantity });
       }
+    } else if (product.availableQuantity !== null) {
+      const updated = await CatalogProduct.updateOne(
+        {
+          _id: product._id,
+          businessId: order.businessId,
+          availableQuantity: { $gte: item.quantity },
+        },
+        { $inc: { availableQuantity: -item.quantity } },
+      );
+      if (!updated.modifiedCount)
+        throw new HttpError(422, `${item.nameSnapshot} is unavailable in that quantity`);
     }
-  } catch (error) {
-    await restoreStock(order.businessId, changed);
-    throw error;
   }
 }
 
@@ -514,7 +503,7 @@ export function isOrderTransitionAllowed(current: string, next: string) {
   return transitions[current]?.includes(next) === true;
 }
 
-export async function updateOrderStatus(
+async function updateOrderStatusInTransaction(
   businessId: Types.ObjectId,
   userId: Types.ObjectId,
   orderId: string,
@@ -540,45 +529,35 @@ export async function updateOrderStatus(
   );
   if (!order) throw new HttpError(409, "This order is already being updated");
 
-  let reservedDuringTransition = false;
-  let restoredDuringTransition = false;
-  try {
-    if (input.status === "CONFIRMED") {
-      await reserveOrderStock(order);
-      reservedDuringTransition = true;
-      order.stockReserved = true;
-      order.confirmedAt = new Date();
-    }
-    if (input.status === "CANCELLED") {
-      if (order.stockReserved) {
-        await restoreOrderStock(order);
-        restoredDuringTransition = true;
-      }
-      order.stockReserved = false;
-      order.cancellationReason = input.cancellationReason?.trim() ?? "";
-      order.cancelledAt = new Date();
-    }
-    if (input.status === "COMPLETED") {
-      order.completedAt = new Date();
-      order.stockReserved = false;
-    }
-    order.status = input.status;
-    order.transitionLock = null;
-    order.statusHistory.push({
-      status: input.status,
-      changedAt: new Date(),
-      changedByUserId: userId,
-      note: input.note?.trim() ?? input.cancellationReason?.trim() ?? "",
-    });
-    await order.save();
-    return order;
-  } catch (error) {
-    if (reservedDuringTransition) await restoreOrderStock(order);
-    if (restoredDuringTransition) await reserveOrderStock(order);
-    await CustomerOrder.updateOne(
-      { _id: orderId, businessId, transitionLock: lock },
-      { $set: { transitionLock: null } },
-    );
-    throw error;
+  if (input.status === "CONFIRMED") {
+    await reserveOrderStock(order);
+
+    order.stockReserved = true;
+    order.confirmedAt = new Date();
   }
+  if (input.status === "CANCELLED") {
+    if (order.stockReserved) {
+      await restoreOrderStock(order);
+    }
+    order.stockReserved = false;
+    order.cancellationReason = input.cancellationReason?.trim() ?? "";
+    order.cancelledAt = new Date();
+  }
+  if (input.status === "COMPLETED") {
+    order.completedAt = new Date();
+    order.stockReserved = false;
+  }
+  order.status = input.status;
+  order.transitionLock = null;
+  order.statusHistory.push({
+    status: input.status,
+    changedAt: new Date(),
+    changedByUserId: userId,
+    note: input.note?.trim() ?? input.cancellationReason?.trim() ?? "",
+  });
+  await order.save();
+  return order;
 }
+
+export const updateOrderStatus = (...args: Parameters<typeof updateOrderStatusInTransaction>) =>
+  inTransaction(() => updateOrderStatusInTransaction(...args));

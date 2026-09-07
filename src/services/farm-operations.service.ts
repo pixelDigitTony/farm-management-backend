@@ -1,7 +1,18 @@
+import {
+  calculateInventoryReceipt,
+  calculateReceiptCorrection,
+} from "../modules/inventory/domain/receipt.js";
+
+export {
+  calculateInventoryReceipt,
+  calculateReceiptCorrection,
+} from "../modules/inventory/domain/receipt.js";
+
 import type { Types } from "mongoose";
 import type { InferOutput } from "valibot";
 import { decimal } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
+import { inTransaction } from "../lib/transaction.js";
 import {
   CashAccount,
   CookingBatch,
@@ -47,74 +58,6 @@ type PigAcquisitionCostUpdateInput = InferOutput<typeof pigAcquisitionCostUpdate
 type PiggerySaleInput = InferOutput<typeof piggerySaleOperationSchema>;
 type CookingBatchInput = InferOutput<typeof cookingBatchOperationSchema>;
 
-export function calculateInventoryReceipt(input: {
-  quantity?: number;
-  unitCost?: number;
-  purchaseQuantity?: number;
-  measurementPerPurchaseUnit?: number;
-  totalPurchaseCost?: number;
-}) {
-  const usesSeparatedInputs =
-    input.purchaseQuantity !== undefined ||
-    input.measurementPerPurchaseUnit !== undefined ||
-    input.totalPurchaseCost !== undefined;
-  if (
-    usesSeparatedInputs &&
-    (input.purchaseQuantity === undefined ||
-      input.measurementPerPurchaseUnit === undefined ||
-      input.totalPurchaseCost === undefined)
-  )
-    throw new HttpError(
-      422,
-      "Enter the purchased quantity, measurement per purchased unit, and total purchase cost",
-    );
-  if (!usesSeparatedInputs && (input.quantity === undefined || input.unitCost === undefined))
-    throw new HttpError(422, "Enter the receipt quantity and unit cost");
-
-  const purchaseQuantity = decimal(input.purchaseQuantity ?? input.quantity ?? 0);
-  const measurementPerPurchaseUnit = decimal(input.measurementPerPurchaseUnit ?? 1);
-  const baseQuantity = purchaseQuantity.times(measurementPerPurchaseUnit);
-  const totalCost = usesSeparatedInputs
-    ? decimal(input.totalPurchaseCost ?? 0)
-    : purchaseQuantity.times(input.unitCost ?? 0);
-  const baseUnitCost = totalCost.dividedBy(baseQuantity);
-  return {
-    usesSeparatedInputs,
-    purchaseQuantity,
-    measurementPerPurchaseUnit,
-    baseQuantity,
-    baseUnitCost,
-    totalCost,
-  };
-}
-
-export function calculateReceiptCorrection(
-  oldInitialValue: Parameters<typeof decimal>[0],
-  oldRemainingValue: Parameters<typeof decimal>[0],
-  newQuantityValue: Parameters<typeof decimal>[0],
-  itemChanged: boolean,
-) {
-  const oldInitial = decimal(oldInitialValue);
-  const oldRemaining = decimal(oldRemainingValue);
-  const consumed = oldInitial.minus(oldRemaining);
-  const newQuantity = decimal(newQuantityValue);
-  if (newQuantity.lessThan(consumed))
-    throw new HttpError(
-      422,
-      `Quantity cannot be less than ${consumed.toString()} because that stock has already been used`,
-    );
-  if (itemChanged && !consumed.isZero())
-    throw new HttpError(
-      422,
-      "The inventory item cannot be changed after stock from this lot was used",
-    );
-  return {
-    consumed,
-    newRemaining: newQuantity.minus(consumed),
-    stockDelta: newQuantity.minus(oldInitial),
-  };
-}
-
 const reference = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
 async function requireCashAccount(
@@ -128,7 +71,7 @@ async function requireCashAccount(
     throw new HttpError(422, "Cash account was not found");
 }
 
-export async function postInventoryReceipt(
+async function postInventoryReceiptInTransaction(
   businessId: Types.ObjectId,
   input: InventoryReceiptInput,
 ) {
@@ -173,47 +116,35 @@ export async function postInventoryReceipt(
     totalCost: totalCost.toString(),
     reason: input.notes || `Inventory receipt for ${item.name}`,
   });
-  let postedExpenseId: string | undefined;
-  try {
-    await InventoryItem.updateOne(
-      { _id: item._id, businessId },
-      {
-        $inc: { currentStockCached: baseQuantity.toString() },
-        $set: { defaultExternalPricePerUnit: baseUnitCost.toString() },
-      },
-    );
-    const expense = await postExpense(businessId, {
-      expenseNumber: reference("EXP"),
-      expenseDate: input.movementDate,
-      businessUnit: input.businessUnit,
-      category:
-        item.category === "FEED"
-          ? "FEED"
-          : item.category === "INGREDIENT" || item.category === "MEAT"
-            ? "INGREDIENT"
-            : "SUPPLY",
-      description: `Inventory purchase: ${item.name}`,
-      totalAmount: Number(totalCost.toString()),
-      amountPaid: input.amountPaid,
-      accountId: input.accountId,
-    });
-    postedExpenseId = expense.id;
-    movement.source = { collection: "expenses", documentId: expense._id };
-    lot.sourceDocumentId = expense._id;
-    await Promise.all([movement.save(), lot.save()]);
-    return { item, lot, movement, expense };
-  } catch (error) {
-    if (postedExpenseId) await deleteExpense(businessId, postedExpenseId);
-    await Promise.all([
-      InventoryItem.updateOne(
-        { _id: item._id, businessId },
-        { $inc: { currentStockCached: baseQuantity.negated().toString() } },
-      ),
-      InventoryMovement.deleteOne({ _id: movement._id }),
-      InventoryLot.deleteOne({ _id: lot._id }),
-    ]);
-    throw error;
-  }
+
+  await InventoryItem.updateOne(
+    { _id: item._id, businessId },
+    {
+      $inc: { currentStockCached: baseQuantity.toString() },
+      $set: { defaultExternalPricePerUnit: baseUnitCost.toString() },
+    },
+  );
+  const expense = await postExpense(businessId, {
+    expenseNumber: reference("EXP"),
+    expenseDate: input.movementDate,
+    businessUnit: input.businessUnit,
+    category:
+      item.category === "FEED"
+        ? "FEED"
+        : item.category === "INGREDIENT" || item.category === "MEAT"
+          ? "INGREDIENT"
+          : "SUPPLY",
+    description: `Inventory purchase: ${item.name}`,
+    totalAmount: Number(totalCost.toString()),
+    amountPaid: input.amountPaid,
+    accountId: input.accountId,
+  });
+
+  movement.source = { collection: "expenses", documentId: expense._id };
+  lot.sourceDocumentId = expense._id;
+  await movement.save();
+  await lot.save();
+  return { item, lot, movement, expense };
 }
 
 export async function getInventoryReceipt(businessId: Types.ObjectId, lotId: string) {
@@ -258,7 +189,7 @@ export async function getInventoryReceipt(businessId: Types.ObjectId, lotId: str
   };
 }
 
-export async function updateInventoryReceipt(
+async function updateInventoryReceiptInTransaction(
   businessId: Types.ObjectId,
   lotId: string,
   input: InventoryReceiptInput,
@@ -330,19 +261,17 @@ export async function updateInventoryReceipt(
       },
     );
   } else {
-    await Promise.all([
-      InventoryItem.updateOne(
-        { _id: lot.itemId, businessId },
-        { $inc: { currentStockCached: oldRemaining.negated().toString() } },
-      ),
-      InventoryItem.updateOne(
-        { _id: item._id, businessId },
-        {
-          $inc: { currentStockCached: newRemaining.toString() },
-          $set: { defaultExternalPricePerUnit: baseUnitCost.toString() },
-        },
-      ),
-    ]);
+    await InventoryItem.updateOne(
+      { _id: lot.itemId, businessId },
+      { $inc: { currentStockCached: oldRemaining.negated().toString() } },
+    );
+    await InventoryItem.updateOne(
+      { _id: item._id, businessId },
+      {
+        $inc: { currentStockCached: newRemaining.toString() },
+        $set: { defaultExternalPricePerUnit: baseUnitCost.toString() },
+      },
+    );
   }
 
   lot.set({
@@ -372,11 +301,12 @@ export async function updateInventoryReceipt(
     totalCost: totalCost.toString(),
     reason: input.notes || `Inventory receipt for ${item.name}`,
   });
-  await Promise.all([lot.save(), movement.save()]);
+  await lot.save();
+  await movement.save();
   return { item, lot, movement, expense: await Expense.findById(expense._id) };
 }
 
-export async function postFeedUsage(businessId: Types.ObjectId, input: FeedUsageInput) {
+async function postFeedUsageInTransaction(businessId: Types.ObjectId, input: FeedUsageInput) {
   if (input.allocationType === "PIG" && !input.pigId)
     throw new HttpError(422, "Select the pig receiving the feed cost");
   if (input.allocationType === "PIG_BATCH" && !input.batchId)
@@ -449,74 +379,54 @@ export async function postFeedUsage(businessId: Types.ObjectId, input: FeedUsage
     await usage.deleteOne();
     throw new HttpError(422, `Not enough ${item.name} in inventory`);
   }
-  let movementId: Types.ObjectId | undefined;
-  let pigCostApplied = false;
-  try {
-    if (lot) {
-      lot.remainingQuantityCached = decimal(lot.remainingQuantityCached?.toString())
-        .minus(input.quantityUsed)
-        .toString() as any;
-      if (decimal(lot.remainingQuantityCached?.toString()).isZero()) lot.status = "DEPLETED";
-      await lot.save();
-    }
-    const movement = await InventoryMovement.create({
-      businessId,
-      movementNumber: reference("FCON"),
-      movementDate: input.usageDate,
-      movementType: "CONSUMPTION",
-      itemId: item._id,
-      fromBusinessUnit: "PIGGERY",
-      fromLotId: lot?._id,
-      quantity: input.quantityUsed,
-      unit: item.baseUnit,
-      unitCostSnapshot: unitCost.toString(),
-      totalCost: totalFeedCost.toString(),
-      allocations: affectedPigIds.map((pigId) => ({
-        targetType: "PIG",
-        targetId: pigId,
-        quantity: decimal(input.quantityUsed)
-          .dividedBy(affectedPigIds.length || 1)
-          .toString(),
-        allocatedCost: costPerPig.toString(),
-      })),
-      source: { collection: "feed_usage_records", documentId: usage._id },
-      reason: input.notes || `Feed usage for ${item.name}`,
-    });
-    movementId = movement._id;
-    if (affectedPigIds.length)
-      await Pig.updateMany(
-        { _id: { $in: affectedPigIds }, businessId },
-        { $inc: { accumulatedCostCached: Number(costPerPig.toString()) } },
-      );
-    pigCostApplied = affectedPigIds.length > 0;
-    usage.inventoryMovementId = movement._id;
-    usage.status = "POSTED";
-    await usage.save();
-    return usage;
-  } catch (error) {
-    await InventoryItem.updateOne(
-      { _id: item._id, businessId },
-      { $inc: { currentStockCached: input.quantityUsed } },
-    );
-    if (lot) {
-      lot.remainingQuantityCached = decimal(lot.remainingQuantityCached?.toString())
-        .plus(input.quantityUsed)
-        .toString() as any;
-      lot.status = "ACTIVE";
-      await lot.save();
-    }
-    if (pigCostApplied)
-      await Pig.updateMany(
-        { _id: { $in: affectedPigIds }, businessId },
-        { $inc: { accumulatedCostCached: -Number(costPerPig.toString()) } },
-      );
-    if (movementId) await InventoryMovement.deleteOne({ _id: movementId });
-    await usage.deleteOne();
-    throw error;
+
+  if (lot) {
+    lot.remainingQuantityCached = decimal(lot.remainingQuantityCached?.toString())
+      .minus(input.quantityUsed)
+      .toString() as any;
+    if (decimal(lot.remainingQuantityCached?.toString()).isZero()) lot.status = "DEPLETED";
+    await lot.save();
   }
+  const movement = await InventoryMovement.create({
+    businessId,
+    movementNumber: reference("FCON"),
+    movementDate: input.usageDate,
+    movementType: "CONSUMPTION",
+    itemId: item._id,
+    fromBusinessUnit: "PIGGERY",
+    fromLotId: lot?._id,
+    quantity: input.quantityUsed,
+    unit: item.baseUnit,
+    unitCostSnapshot: unitCost.toString(),
+    totalCost: totalFeedCost.toString(),
+    allocations: affectedPigIds.map((pigId) => ({
+      targetType: "PIG",
+      targetId: pigId,
+      quantity: decimal(input.quantityUsed)
+        .dividedBy(affectedPigIds.length || 1)
+        .toString(),
+      allocatedCost: costPerPig.toString(),
+    })),
+    source: { collection: "feed_usage_records", documentId: usage._id },
+    reason: input.notes || `Feed usage for ${item.name}`,
+  });
+
+  if (affectedPigIds.length)
+    await Pig.updateMany(
+      { _id: { $in: affectedPigIds }, businessId },
+      { $inc: { accumulatedCostCached: Number(costPerPig.toString()) } },
+    );
+
+  usage.inventoryMovementId = movement._id;
+  usage.status = "POSTED";
+  await usage.save();
+  return usage;
 }
 
-export async function postPigMeasurement(businessId: Types.ObjectId, input: PigMeasurementInput) {
+async function postPigMeasurementInTransaction(
+  businessId: Types.ObjectId,
+  input: PigMeasurementInput,
+) {
   const pig = await Pig.findOne({ _id: input.pigId, businessId, status: "ACTIVE" });
   if (!pig) throw new HttpError(422, "Select an active pig to record its weight");
   const measurement = await PigMeasurement.create({
@@ -532,7 +442,10 @@ export async function postPigMeasurement(businessId: Types.ObjectId, input: PigM
   return measurement;
 }
 
-export async function postPigAcquisition(businessId: Types.ObjectId, input: PigAcquisitionInput) {
+async function postPigAcquisitionInTransaction(
+  businessId: Types.ObjectId,
+  input: PigAcquisitionInput,
+) {
   if (input.amountPaid > input.purchaseCost)
     throw new HttpError(422, "Amount paid cannot exceed the pig purchase cost");
   await requireCashAccount(businessId, input.accountId, input.amountPaid);
@@ -551,38 +464,32 @@ export async function postPigAcquisition(businessId: Types.ObjectId, input: PigA
     notes: input.notes,
     status: "ACTIVE",
   });
-  let postedExpenseId: string | undefined;
-  try {
-    const expense = await postExpense(businessId, {
-      expenseNumber: reference("EXP-PIG"),
-      expenseDate: input.acquisitionDate,
-      businessUnit: "PIGGERY",
-      category: "PIG_PURCHASE",
-      description: `Pig purchase: ${pig.pigCode}`,
-      totalAmount: input.purchaseCost,
-      amountPaid: input.amountPaid,
-      accountId: input.accountId,
-    });
-    postedExpenseId = expense.id;
-    expense.allocations = [
-      {
-        targetType: "PIG",
-        targetId: pig._id,
-        allocationMethod: "AMOUNT",
-        value: input.purchaseCost,
-        allocatedAmount: input.purchaseCost,
-      },
-    ] as any;
-    await expense.save();
-    return { pig, expense };
-  } catch (error) {
-    if (postedExpenseId) await deleteExpense(businessId, postedExpenseId);
-    await pig.deleteOne();
-    throw error;
-  }
+
+  const expense = await postExpense(businessId, {
+    expenseNumber: reference("EXP-PIG"),
+    expenseDate: input.acquisitionDate,
+    businessUnit: "PIGGERY",
+    category: "PIG_PURCHASE",
+    description: `Pig purchase: ${pig.pigCode}`,
+    totalAmount: input.purchaseCost,
+    amountPaid: input.amountPaid,
+    accountId: input.accountId,
+  });
+
+  expense.allocations = [
+    {
+      targetType: "PIG",
+      targetId: pig._id,
+      allocationMethod: "AMOUNT",
+      value: input.purchaseCost,
+      allocatedAmount: input.purchaseCost,
+    },
+  ] as any;
+  await expense.save();
+  return { pig, expense };
 }
 
-export async function updatePigAcquisitionCost(
+async function updatePigAcquisitionCostInTransaction(
   businessId: Types.ObjectId,
   pigId: string,
   input: PigAcquisitionCostUpdateInput,
@@ -628,28 +535,21 @@ export async function updatePigAcquisitionCost(
   }
 
   await pig.save();
-  try {
-    await expense.save();
-  } catch (error) {
-    pig.purchaseCost = previousCost.toString() as any;
-    pig.accumulatedCostCached = decimal(nextAccumulatedCost)
-      .minus(nextCost.minus(previousCost))
-      .toString() as any;
-    await pig.save();
-    throw error;
-  }
+
+  await expense.save();
+
   return { pig, expense };
 }
 
-export async function deletePigAcquisition(businessId: Types.ObjectId, pigId: string) {
+async function deletePigAcquisitionInTransaction(businessId: Types.ObjectId, pigId: string) {
   const pig = await Pig.findOne({ _id: pigId, businessId, status: "ACTIVE" });
   if (!pig) throw new HttpError(404, "Active pig was not found");
-  const [measurement, feed, slaughter, sale] = await Promise.all([
-    PigMeasurement.exists({ businessId, pigId: pig._id }),
-    FeedUsageRecord.exists({ businessId, pigId: pig._id }),
-    SlaughterRecord.exists({ businessId, pigId: pig._id }),
-    PiggerySale.exists({ businessId, "items.pigId": pig._id }),
-  ]);
+  const [measurement, feed, slaughter, sale] = [
+    await PigMeasurement.exists({ businessId, pigId: pig._id }),
+    await FeedUsageRecord.exists({ businessId, pigId: pig._id }),
+    await SlaughterRecord.exists({ businessId, pigId: pig._id }),
+    await PiggerySale.exists({ businessId, "items.pigId": pig._id }),
+  ];
   if (measurement || feed || slaughter || sale)
     throw new HttpError(409, "This pig already has operational history and cannot be deleted");
   const expense = await Expense.findOne({
@@ -663,7 +563,7 @@ export async function deletePigAcquisition(businessId: Types.ObjectId, pigId: st
 
 type SlaughterPostOptions = { recordId?: string; slaughterNumber?: string };
 
-export async function postSlaughterRecord(
+async function postSlaughterRecordInTransaction(
   businessId: Types.ObjectId,
   input: SlaughterInput,
   options: SlaughterPostOptions = {},
@@ -717,139 +617,115 @@ export async function postSlaughterRecord(
       })
     : await SlaughterRecord.create(recordData);
   if (!record) throw new HttpError(404, "Slaughter record was not found");
-  const createdLots: Array<{ itemId: Types.ObjectId; lotId: Types.ObjectId; quantity: number }> =
-    [];
-  const createdMovementIds: Types.ObjectId[] = [];
-  let postedExpenseId: string | undefined;
-  try {
-    const storedParts = [];
-    for (const [index, part] of input.parts.entries()) {
-      if (part.classification === "WASTE" || part.weightKg <= 0) {
-        storedParts.push({
-          partCode: `PART-${index + 1}`,
-          partName: part.name,
-          classification: part.classification,
-          weightKg: part.weightKg,
-          allocatedCost: 0,
-          productionCostPerKg: 0,
-          externalPricePerKg: part.externalPricePerKg,
-          karenderiyaTransferPricePerKg: part.karenderiyaTransferPricePerKg,
-        });
-        continue;
-      }
-      let item = await InventoryItem.findOne({
-        businessId,
-        name: part.name,
-        category: part.classification === "MEAT" ? "MEAT" : "BYPRODUCT",
-      });
-      if (!item)
-        item = await InventoryItem.create({
-          businessId,
-          itemCode: reference(part.classification === "MEAT" ? "MEAT" : "BYPROD"),
-          name: part.name,
-          businessUnit: "PIGGERY",
-          category: part.classification === "MEAT" ? "MEAT" : "BYPRODUCT",
-          baseUnit: "KG",
-          defaultExternalPricePerUnit: part.externalPricePerKg,
-          defaultKarenderiyaTransferPricePerUnit: part.karenderiyaTransferPricePerKg,
-          currentStockCached: 0,
-          isPerishable: true,
-        });
-      const allocatedCost = decimal(quote.costPerUsableKg).times(part.weightKg);
-      const lot = await InventoryLot.create({
-        businessId,
-        itemId: item._id,
-        lotCode: `${slaughterNumber}-${index + 1}`,
-        sourceType: "SLAUGHTER",
-        sourceDocumentId: record._id,
-        businessUnit: "PIGGERY",
-        receivedDate: input.slaughterDate,
-        initialQuantity: part.weightKg,
-        remainingQuantityCached: part.weightKg,
-        unitCost: quote.costPerUsableKg,
-        totalCost: allocatedCost.toString(),
-      });
-      await InventoryItem.updateOne(
-        { _id: item._id, businessId },
-        {
-          $inc: { currentStockCached: part.weightKg },
-          $set: {
-            defaultExternalPricePerUnit: part.externalPricePerKg,
-            defaultKarenderiyaTransferPricePerUnit: part.karenderiyaTransferPricePerKg,
-          },
-        },
-      );
-      createdLots.push({ itemId: item._id, lotId: lot._id, quantity: part.weightKg });
-      const movement = await InventoryMovement.create({
-        businessId,
-        movementNumber: reference("PROD"),
-        movementDate: input.slaughterDate,
-        movementType: "PRODUCTION",
-        itemId: item._id,
-        toBusinessUnit: "PIGGERY",
-        toLotId: lot._id,
-        quantity: part.weightKg,
-        unit: "KG",
-        unitCostSnapshot: quote.costPerUsableKg,
-        totalCost: allocatedCost.toString(),
-        source: { collection: "slaughter_records", documentId: record._id },
-        reason: `Produced by ${slaughterNumber}`,
-      });
-      createdMovementIds.push(movement._id);
+
+  const storedParts = [];
+  for (const [index, part] of input.parts.entries()) {
+    if (part.classification === "WASTE" || part.weightKg <= 0) {
       storedParts.push({
-        inventoryItemId: item._id,
-        partCode: item.itemCode,
+        partCode: `PART-${index + 1}`,
         partName: part.name,
         classification: part.classification,
         weightKg: part.weightKg,
-        allocatedCost: allocatedCost.toString(),
-        productionCostPerKg: quote.costPerUsableKg,
+        allocatedCost: 0,
+        productionCostPerKg: 0,
         externalPricePerKg: part.externalPricePerKg,
         karenderiyaTransferPricePerKg: part.karenderiyaTransferPricePerKg,
-        producedLotId: lot._id,
       });
+      continue;
     }
-    let expense: InstanceType<typeof Expense> | undefined;
-    if (Number(quote.slaughterCost) > 0)
-      expense = await postExpense(businessId, {
-        expenseNumber: reference("EXP-SLT"),
-        expenseDate: input.slaughterDate,
+    let item = await InventoryItem.findOne({
+      businessId,
+      name: part.name,
+      category: part.classification === "MEAT" ? "MEAT" : "BYPRODUCT",
+    });
+    if (!item)
+      item = await InventoryItem.create({
+        businessId,
+        itemCode: reference(part.classification === "MEAT" ? "MEAT" : "BYPROD"),
+        name: part.name,
         businessUnit: "PIGGERY",
-        category: "SLAUGHTER",
-        description: `Slaughter costs for ${pig.pigCode}`,
-        totalAmount: Number(quote.slaughterCost),
-        amountPaid: input.amountPaid,
-        accountId: input.accountId,
+        category: part.classification === "MEAT" ? "MEAT" : "BYPRODUCT",
+        baseUnit: "KG",
+        defaultExternalPricePerUnit: part.externalPricePerKg,
+        defaultKarenderiyaTransferPricePerUnit: part.karenderiyaTransferPricePerKg,
+        currentStockCached: 0,
+        isPerishable: true,
       });
-    postedExpenseId = expense?.id;
-    record.parts = storedParts as any;
-    record.status = "COMPLETED";
-    if (expense && record.costLines[0]) record.costLines[0].expenseId = expense._id;
-    await record.save();
-    pig.status = "SLAUGHTERED";
-    pig.statusDate = input.slaughterDate;
-    pig.latestWeightKgCached = input.liveWeightKg as any;
-    await pig.save();
-    return record;
-  } catch (error) {
-    if (postedExpenseId) await deleteExpense(businessId, postedExpenseId);
-    for (const created of createdLots)
-      await InventoryItem.updateOne(
-        { _id: created.itemId, businessId },
-        { $inc: { currentStockCached: -created.quantity } },
-      );
-    await Promise.all([
-      InventoryLot.deleteMany({ _id: { $in: createdLots.map((item) => item.lotId) } }),
-      InventoryMovement.deleteMany({ _id: { $in: createdMovementIds } }),
-      options.recordId
-        ? SlaughterRecord.updateOne(
-            { _id: record._id, businessId },
-            { $set: { parts: [], status: "DRAFT" } },
-          )
-        : record.deleteOne(),
-    ]);
-    throw error;
+    const allocatedCost = decimal(quote.costPerUsableKg).times(part.weightKg);
+    const lot = await InventoryLot.create({
+      businessId,
+      itemId: item._id,
+      lotCode: `${slaughterNumber}-${index + 1}`,
+      sourceType: "SLAUGHTER",
+      sourceDocumentId: record._id,
+      businessUnit: "PIGGERY",
+      receivedDate: input.slaughterDate,
+      initialQuantity: part.weightKg,
+      remainingQuantityCached: part.weightKg,
+      unitCost: quote.costPerUsableKg,
+      totalCost: allocatedCost.toString(),
+    });
+    await InventoryItem.updateOne(
+      { _id: item._id, businessId },
+      {
+        $inc: { currentStockCached: part.weightKg },
+        $set: {
+          defaultExternalPricePerUnit: part.externalPricePerKg,
+          defaultKarenderiyaTransferPricePerUnit: part.karenderiyaTransferPricePerKg,
+        },
+      },
+    );
+    const movement = await InventoryMovement.create({
+      businessId,
+      movementNumber: reference("PROD"),
+      movementDate: input.slaughterDate,
+      movementType: "PRODUCTION",
+      itemId: item._id,
+      toBusinessUnit: "PIGGERY",
+      toLotId: lot._id,
+      quantity: part.weightKg,
+      unit: "KG",
+      unitCostSnapshot: quote.costPerUsableKg,
+      totalCost: allocatedCost.toString(),
+      source: { collection: "slaughter_records", documentId: record._id },
+      reason: `Produced by ${slaughterNumber}`,
+    });
+
+    storedParts.push({
+      inventoryItemId: item._id,
+      partCode: item.itemCode,
+      partName: part.name,
+      classification: part.classification,
+      weightKg: part.weightKg,
+      allocatedCost: allocatedCost.toString(),
+      productionCostPerKg: quote.costPerUsableKg,
+      externalPricePerKg: part.externalPricePerKg,
+      karenderiyaTransferPricePerKg: part.karenderiyaTransferPricePerKg,
+      producedLotId: lot._id,
+    });
   }
+  let expense: InstanceType<typeof Expense> | undefined;
+  if (Number(quote.slaughterCost) > 0)
+    expense = await postExpense(businessId, {
+      expenseNumber: reference("EXP-SLT"),
+      expenseDate: input.slaughterDate,
+      businessUnit: "PIGGERY",
+      category: "SLAUGHTER",
+      description: `Slaughter costs for ${pig.pigCode}`,
+      totalAmount: Number(quote.slaughterCost),
+      amountPaid: input.amountPaid,
+      accountId: input.accountId,
+    });
+
+  record.parts = storedParts as any;
+  record.status = "COMPLETED";
+  if (expense && record.costLines[0]) record.costLines[0].expenseId = expense._id;
+  await record.save();
+  pig.status = "SLAUGHTERED";
+  pig.statusDate = input.slaughterDate;
+  pig.latestWeightKgCached = input.liveWeightKg as any;
+  await pig.save();
+  return record;
 }
 
 async function reverseSlaughterEffects(
@@ -913,14 +789,12 @@ async function reverseSlaughterEffects(
       { _id: itemId, businessId },
       { $inc: { currentStockCached: -quantity } },
     );
-  await Promise.all([
-    InventoryMovement.deleteMany({
-      businessId,
-      "source.collection": "slaughter_records",
-      "source.documentId": record._id,
-    }),
-    InventoryLot.deleteMany({ _id: { $in: lotIds }, businessId }),
-  ]);
+  await InventoryMovement.deleteMany({
+    businessId,
+    "source.collection": "slaughter_records",
+    "source.documentId": record._id,
+  });
+  await InventoryLot.deleteMany({ _id: { $in: lotIds }, businessId });
   const latestMeasurement = await PigMeasurement.findOne({
     businessId,
     pigId: record.pigId,
@@ -946,7 +820,7 @@ async function reverseSlaughterEffects(
   else await record.deleteOne();
 }
 
-export async function updateSlaughterRecord(
+async function updateSlaughterRecordInTransaction(
   businessId: Types.ObjectId,
   recordId: string,
   input: SlaughterInput,
@@ -955,46 +829,14 @@ export async function updateSlaughterRecord(
   if (!record) throw new HttpError(404, "Slaughter record was not found");
   if (String(record.pigId) !== input.pigId)
     throw new HttpError(422, "The pig on a completed slaughter record cannot be changed");
-  const expenseId = (record.costLines as any[]).find((line) => line.expenseId)?.expenseId;
-  const expense = expenseId ? await Expense.findOne({ _id: expenseId, businessId }).lean() : null;
-  const previousInput: SlaughterInput = {
-    pigId: String(record.pigId),
-    slaughterDate: record.slaughterDate,
-    liveWeightKg: Number(record.liveWeightKg?.toString() ?? 0),
-    carcassWeightKg: Number(record.wholeCarcassWeightKg?.toString() ?? 0),
-    costs: (record.costLines as any[]).map((line) => ({
-      name: line.name,
-      amount: Number(line.amount?.toString() ?? 0),
-    })),
-    parts: (record.parts as any[]).map((part) => ({
-      name: part.partName,
-      classification: part.classification,
-      weightKg: Number(part.weightKg?.toString() ?? 0),
-      externalPricePerKg: Number(part.externalPricePerKg?.toString() ?? 0),
-      karenderiyaTransferPricePerKg: Number(part.karenderiyaTransferPricePerKg?.toString() ?? 0),
-    })),
-    amountPaid: Number(expense?.amountPaidCached?.toString() ?? 0),
-    accountId: expense?.paymentAccountIdCached ? String(expense.paymentAccountIdCached) : undefined,
-    notes: record.notes,
-  };
+
   const slaughterNumber = record.slaughterNumber;
   await reverseSlaughterEffects(businessId, record, true);
-  try {
-    return await postSlaughterRecord(businessId, input, { recordId, slaughterNumber });
-  } catch (error) {
-    try {
-      await postSlaughterRecord(businessId, previousInput, { recordId, slaughterNumber });
-    } catch {
-      throw new HttpError(
-        500,
-        "The correction failed and the original slaughter record could not be restored",
-      );
-    }
-    throw error;
-  }
+
+  return await postSlaughterRecord(businessId, input, { recordId, slaughterNumber });
 }
 
-export async function deleteSlaughterRecord(
+async function deleteSlaughterRecordInTransaction(
   businessId: Types.ObjectId,
   recordId: string,
   allowMissingExpense = false,
@@ -1004,22 +846,22 @@ export async function deleteSlaughterRecord(
   await reverseSlaughterEffects(businessId, record, false, allowMissingExpense);
 }
 
-export async function postMeatTransfer(businessId: Types.ObjectId, input: MeatTransferInput) {
-  const [item, sourceLot] = await Promise.all([
-    InventoryItem.findOne({
+async function postMeatTransferInTransaction(businessId: Types.ObjectId, input: MeatTransferInput) {
+  const [item, sourceLot] = [
+    await InventoryItem.findOne({
       _id: input.inventoryItemId,
       businessId,
       category: { $in: ["MEAT", "BYPRODUCT"] },
       isActive: true,
     }),
-    InventoryLot.findOne({
+    await InventoryLot.findOne({
       _id: input.sourceLotId,
       itemId: input.inventoryItemId,
       businessId,
       businessUnit: "PIGGERY",
       status: "ACTIVE",
     }),
-  ]);
+  ];
   if (!item || !sourceLot) throw new HttpError(404, "Piggery meat lot was not found");
   if (decimal(sourceLot.remainingQuantityCached?.toString()).lessThan(input.quantity))
     throw new HttpError(422, "Transfer quantity exceeds the available piggery lot");
@@ -1035,51 +877,43 @@ export async function postMeatTransfer(businessId: Types.ObjectId, input: MeatTr
   if (decimal(sourceLot.remainingQuantityCached?.toString()).isZero())
     sourceLot.status = "DEPLETED";
   await sourceLot.save();
-  try {
-    const targetLot = await InventoryLot.create({
-      businessId,
-      itemId: item._id,
-      lotCode: reference("KLOT"),
-      parentLotId: sourceLot._id,
-      sourceType: "INTERNAL_TRANSFER",
-      businessUnit: "KARENDERIYA",
-      storageLocation: input.storageLocation,
-      receivedDate: input.movementDate,
-      initialQuantity: input.quantity,
-      remainingQuantityCached: input.quantity,
-      unitCost: unitCost.toString(),
-      totalCost: unitCost.times(input.quantity).toString(),
-    });
-    const movement = await InventoryMovement.create({
-      businessId,
-      movementNumber: reference("XFER"),
-      movementDate: input.movementDate,
-      movementType: "TRANSFER",
-      itemId: item._id,
-      fromBusinessUnit: "PIGGERY",
-      toBusinessUnit: "KARENDERIYA",
-      fromLotId: sourceLot._id,
-      toLotId: targetLot._id,
-      quantity: input.quantity,
-      unit: "KG",
-      unitCostSnapshot: unitCost.toString(),
-      totalCost: unitCost.times(input.quantity).toString(),
-      reason: input.notes || "Internal meat transfer to karenderiya",
-    });
-    targetLot.sourceDocumentId = movement._id;
-    await targetLot.save();
-    return { movement, sourceLot, targetLot };
-  } catch (error) {
-    sourceLot.remainingQuantityCached = decimal(sourceLot.remainingQuantityCached?.toString())
-      .plus(input.quantity)
-      .toString() as any;
-    sourceLot.status = "ACTIVE";
-    await sourceLot.save();
-    throw error;
-  }
+
+  const targetLot = await InventoryLot.create({
+    businessId,
+    itemId: item._id,
+    lotCode: reference("KLOT"),
+    parentLotId: sourceLot._id,
+    sourceType: "INTERNAL_TRANSFER",
+    businessUnit: "KARENDERIYA",
+    storageLocation: input.storageLocation,
+    receivedDate: input.movementDate,
+    initialQuantity: input.quantity,
+    remainingQuantityCached: input.quantity,
+    unitCost: unitCost.toString(),
+    totalCost: unitCost.times(input.quantity).toString(),
+  });
+  const movement = await InventoryMovement.create({
+    businessId,
+    movementNumber: reference("XFER"),
+    movementDate: input.movementDate,
+    movementType: "TRANSFER",
+    itemId: item._id,
+    fromBusinessUnit: "PIGGERY",
+    toBusinessUnit: "KARENDERIYA",
+    fromLotId: sourceLot._id,
+    toLotId: targetLot._id,
+    quantity: input.quantity,
+    unit: "KG",
+    unitCostSnapshot: unitCost.toString(),
+    totalCost: unitCost.times(input.quantity).toString(),
+    reason: input.notes || "Internal meat transfer to karenderiya",
+  });
+  targetLot.sourceDocumentId = movement._id;
+  await targetLot.save();
+  return { movement, sourceLot, targetLot };
 }
 
-export async function postPiggerySale(businessId: Types.ObjectId, input: PiggerySaleInput) {
+async function postPiggerySaleInTransaction(businessId: Types.ObjectId, input: PiggerySaleInput) {
   const quantity = input.priceBasis === "PER_HEAD" ? input.headCount : input.weightKg;
   if (!quantity) throw new HttpError(422, "Enter the sale quantity for the selected price basis");
   const total = decimal(input.price).times(quantity);
@@ -1096,15 +930,15 @@ export async function postPiggerySale(businessId: Types.ObjectId, input: Piggery
     if (!pig) throw new HttpError(422, "Select an active pig to sell");
     cost = decimal(pig.accumulatedCostCached?.toString());
   } else {
-    [item, lot] = await Promise.all([
-      InventoryItem.findOne({ _id: input.inventoryItemId, businessId, isActive: true }),
-      InventoryLot.findOne({
+    [item, lot] = [
+      await InventoryItem.findOne({ _id: input.inventoryItemId, businessId, isActive: true }),
+      await InventoryLot.findOne({
         _id: input.inventoryLotId,
         itemId: input.inventoryItemId,
         businessId,
         status: "ACTIVE",
       }),
-    ]);
+    ];
     if (!item || !lot) throw new HttpError(422, "Select an available meat inventory lot");
     if (
       !input.weightKg ||
@@ -1148,90 +982,61 @@ export async function postPiggerySale(businessId: Types.ObjectId, input: Piggery
     notes: input.notes,
     status: "DRAFT",
   });
-  try {
-    if (pig) {
-      pig.status = "SOLD";
-      pig.statusDate = input.saleDate;
-      await pig.save();
-    }
-    if (item && lot && input.weightKg) {
-      lot.remainingQuantityCached = decimal(lot.remainingQuantityCached?.toString())
-        .minus(input.weightKg)
-        .toString() as any;
-      if (decimal(lot.remainingQuantityCached?.toString()).isZero()) lot.status = "DEPLETED";
-      await Promise.all([
-        lot.save(),
-        InventoryItem.updateOne(
-          { _id: item._id, businessId },
-          { $inc: { currentStockCached: -input.weightKg } },
-        ),
-        InventoryMovement.create({
-          businessId,
-          movementNumber: reference("SALE"),
-          movementDate: input.saleDate,
-          movementType: "SALE",
-          itemId: item._id,
-          fromBusinessUnit: lot.businessUnit,
-          toBusinessUnit: "EXTERNAL",
-          fromLotId: lot._id,
-          quantity: input.weightKg,
-          unit: item.baseUnit,
-          unitCostSnapshot: lot.unitCost,
-          totalCost: cost.toString(),
-          source: { collection: "piggery_sales", documentId: sale._id },
-          reason: input.description,
-        }),
-      ]);
-    }
-    if (input.amountReceived > 0) {
-      const transaction = await postCash(
-        businessId,
-        {
-          transactionDate: input.saleDate,
-          businessUnit: "PIGGERY",
-          transactionType: "CASH_IN",
-          category: "SALE_COLLECTION",
-          amount: input.amountReceived,
-          accountId: input.receivingAccountId,
-          description: `Piggery sale ${sale.saleNumber}`,
-        },
-        { collection: "piggery_sales", documentId: sale._id },
-      );
-      sale.cashTransactionId = transaction._id;
-    }
-    sale.status = "POSTED";
-    await sale.save();
-    return sale;
-  } catch (error) {
-    if (pig) {
-      pig.status = "ACTIVE";
-      pig.statusDate = undefined;
-      await pig.save();
-    }
-    if (item && lot && input.weightKg) {
-      lot.remainingQuantityCached = decimal(lot.remainingQuantityCached?.toString())
-        .plus(input.weightKg)
-        .toString() as any;
-      lot.status = "ACTIVE";
-      await Promise.all([
-        lot.save(),
-        InventoryItem.updateOne(
-          { _id: item._id, businessId },
-          { $inc: { currentStockCached: input.weightKg } },
-        ),
-        InventoryMovement.deleteMany({
-          businessId,
-          "source.collection": "piggery_sales",
-          "source.documentId": sale._id,
-        }),
-      ]);
-    }
-    await sale.deleteOne();
-    throw error;
+
+  if (pig) {
+    pig.status = "SOLD";
+    pig.statusDate = input.saleDate;
+    await pig.save();
   }
+  if (item && lot && input.weightKg) {
+    lot.remainingQuantityCached = decimal(lot.remainingQuantityCached?.toString())
+      .minus(input.weightKg)
+      .toString() as any;
+    if (decimal(lot.remainingQuantityCached?.toString()).isZero()) lot.status = "DEPLETED";
+    await lot.save();
+    await InventoryItem.updateOne(
+      { _id: item._id, businessId },
+      { $inc: { currentStockCached: -input.weightKg } },
+    );
+    await InventoryMovement.create({
+      businessId,
+      movementNumber: reference("SALE"),
+      movementDate: input.saleDate,
+      movementType: "SALE",
+      itemId: item._id,
+      fromBusinessUnit: lot.businessUnit,
+      toBusinessUnit: "EXTERNAL",
+      fromLotId: lot._id,
+      quantity: input.weightKg,
+      unit: item.baseUnit,
+      unitCostSnapshot: lot.unitCost,
+      totalCost: cost.toString(),
+      source: { collection: "piggery_sales", documentId: sale._id },
+      reason: input.description,
+    });
+  }
+  if (input.amountReceived > 0) {
+    const transaction = await postCash(
+      businessId,
+      {
+        transactionDate: input.saleDate,
+        businessUnit: "PIGGERY",
+        transactionType: "CASH_IN",
+        category: "SALE_COLLECTION",
+        amount: input.amountReceived,
+        accountId: input.receivingAccountId,
+        description: `Piggery sale ${sale.saleNumber}`,
+      },
+      { collection: "piggery_sales", documentId: sale._id },
+    );
+    sale.cashTransactionId = transaction._id;
+  }
+  sale.status = "POSTED";
+  await sale.save();
+  return sale;
 }
 
-export async function postCookingBatch(businessId: Types.ObjectId, input: CookingBatchInput) {
+async function postCookingBatchInTransaction(businessId: Types.ObjectId, input: CookingBatchInput) {
   const menu = await MenuItem.findOne({
     _id: input.menuItemId,
     businessId,
@@ -1277,86 +1082,117 @@ export async function postCookingBatch(businessId: Types.ObjectId, input: Cookin
     notes: input.notes,
     status: "DRAFT",
   });
-  const changed: Array<{ id: Types.ObjectId; quantity: string }> = [];
-  const movements: Types.ObjectId[] = [];
-  try {
-    const usages = [];
-    let ingredientTotal = decimal(0);
-    for (const requirement of requirements) {
-      const quantity = requirement.quantity.toString();
-      const updated = await InventoryItem.findOneAndUpdate(
-        {
-          _id: requirement.item._id,
-          businessId,
-          currentStockCached: { $gte: quantity },
-        },
-        { $inc: { currentStockCached: requirement.quantity.negated().toString() } },
-        { new: true },
-      );
-      if (!updated) throw new HttpError(422, `Not enough ${requirement.item.name} in inventory`);
-      changed.push({ id: requirement.item._id, quantity });
-      const unitCost = decimal(
-        requirement.item.defaultKarenderiyaTransferPricePerUnit?.toString() ??
-          requirement.item.defaultExternalPricePerUnit?.toString() ??
-          0,
-      );
-      const totalCost = unitCost.times(requirement.quantity);
-      ingredientTotal = ingredientTotal.plus(totalCost);
-      const movement = await InventoryMovement.create({
+
+  const usages = [];
+  let ingredientTotal = decimal(0);
+  for (const requirement of requirements) {
+    const quantity = requirement.quantity.toString();
+    const updated = await InventoryItem.findOneAndUpdate(
+      {
+        _id: requirement.item._id,
         businessId,
-        movementNumber: reference("CCON"),
-        movementDate: input.cookingDate,
-        movementType: "CONSUMPTION",
-        itemId: requirement.item._id,
-        fromBusinessUnit: "KARENDERIYA",
-        quantity,
-        unit: requirement.item.baseUnit,
-        unitCostSnapshot: unitCost.toString(),
-        totalCost: totalCost.toString(),
-        allocations: [
-          {
-            targetType: "COOKING_BATCH",
-            targetId: batch._id,
-            quantity,
-            allocatedCost: totalCost.toString(),
-          },
-        ],
-        source: { collection: "cooking_batches", documentId: batch._id },
-        reason: `Ingredients for ${batch.cookingBatchNumber}`,
-      });
-      movements.push(movement._id);
-      usages.push({
-        inventoryItemId: requirement.item._id,
-        quantityUsed: quantity,
-        unit: requirement.item.baseUnit,
-        unitCostSnapshot: unitCost.toString(),
-        totalCost: totalCost.toString(),
-        inventoryMovementId: movement._id,
-      });
-    }
-    const additionalTotal = input.additionalCosts.reduce(
-      (total, cost) => total.plus(cost.amount),
-      decimal(0),
+        currentStockCached: { $gte: quantity },
+      },
+      { $inc: { currentStockCached: requirement.quantity.negated().toString() } },
+      { new: true },
     );
-    const batchTotal = ingredientTotal.plus(additionalTotal);
-    batch.ingredientUsages = usages as any;
-    batch.totalIngredientCost = ingredientTotal.toString() as any;
-    batch.totalAdditionalCost = additionalTotal.toString() as any;
-    batch.totalBatchCost = batchTotal.toString() as any;
-    batch.costPerServing = batchTotal.dividedBy(input.actualServingsProduced).toString() as any;
-    batch.status = "COMPLETED";
-    await batch.save();
-    return batch;
-  } catch (error) {
-    for (const item of changed)
-      await InventoryItem.updateOne(
-        { _id: item.id, businessId },
-        { $inc: { currentStockCached: item.quantity } },
-      );
-    await Promise.all([
-      InventoryMovement.deleteMany({ _id: { $in: movements } }),
-      batch.deleteOne(),
-    ]);
-    throw error;
+    if (!updated) throw new HttpError(422, `Not enough ${requirement.item.name} in inventory`);
+
+    const unitCost = decimal(
+      requirement.item.defaultKarenderiyaTransferPricePerUnit?.toString() ??
+        requirement.item.defaultExternalPricePerUnit?.toString() ??
+        0,
+    );
+    const totalCost = unitCost.times(requirement.quantity);
+    ingredientTotal = ingredientTotal.plus(totalCost);
+    const movement = await InventoryMovement.create({
+      businessId,
+      movementNumber: reference("CCON"),
+      movementDate: input.cookingDate,
+      movementType: "CONSUMPTION",
+      itemId: requirement.item._id,
+      fromBusinessUnit: "KARENDERIYA",
+      quantity,
+      unit: requirement.item.baseUnit,
+      unitCostSnapshot: unitCost.toString(),
+      totalCost: totalCost.toString(),
+      allocations: [
+        {
+          targetType: "COOKING_BATCH",
+          targetId: batch._id,
+          quantity,
+          allocatedCost: totalCost.toString(),
+        },
+      ],
+      source: { collection: "cooking_batches", documentId: batch._id },
+      reason: `Ingredients for ${batch.cookingBatchNumber}`,
+    });
+
+    usages.push({
+      inventoryItemId: requirement.item._id,
+      quantityUsed: quantity,
+      unit: requirement.item.baseUnit,
+      unitCostSnapshot: unitCost.toString(),
+      totalCost: totalCost.toString(),
+      inventoryMovementId: movement._id,
+    });
   }
+  const additionalTotal = input.additionalCosts.reduce(
+    (total, cost) => total.plus(cost.amount),
+    decimal(0),
+  );
+  const batchTotal = ingredientTotal.plus(additionalTotal);
+  batch.ingredientUsages = usages as any;
+  batch.totalIngredientCost = ingredientTotal.toString() as any;
+  batch.totalAdditionalCost = additionalTotal.toString() as any;
+  batch.totalBatchCost = batchTotal.toString() as any;
+  batch.costPerServing = batchTotal.dividedBy(input.actualServingsProduced).toString() as any;
+  batch.status = "COMPLETED";
+  await batch.save();
+  return batch;
 }
+
+export const postInventoryReceipt = (
+  ...args: Parameters<typeof postInventoryReceiptInTransaction>
+) => inTransaction(() => postInventoryReceiptInTransaction(...args));
+
+export const updateInventoryReceipt = (
+  ...args: Parameters<typeof updateInventoryReceiptInTransaction>
+) => inTransaction(() => updateInventoryReceiptInTransaction(...args));
+
+export const postFeedUsage = (...args: Parameters<typeof postFeedUsageInTransaction>) =>
+  inTransaction(() => postFeedUsageInTransaction(...args));
+
+export const postPigMeasurement = (...args: Parameters<typeof postPigMeasurementInTransaction>) =>
+  inTransaction(() => postPigMeasurementInTransaction(...args));
+
+export const postPigAcquisition = (...args: Parameters<typeof postPigAcquisitionInTransaction>) =>
+  inTransaction(() => postPigAcquisitionInTransaction(...args));
+
+export const updatePigAcquisitionCost = (
+  ...args: Parameters<typeof updatePigAcquisitionCostInTransaction>
+) => inTransaction(() => updatePigAcquisitionCostInTransaction(...args));
+
+export const deletePigAcquisition = (
+  ...args: Parameters<typeof deletePigAcquisitionInTransaction>
+) => inTransaction(() => deletePigAcquisitionInTransaction(...args));
+
+export const postSlaughterRecord = (...args: Parameters<typeof postSlaughterRecordInTransaction>) =>
+  inTransaction(() => postSlaughterRecordInTransaction(...args));
+
+export const updateSlaughterRecord = (
+  ...args: Parameters<typeof updateSlaughterRecordInTransaction>
+) => inTransaction(() => updateSlaughterRecordInTransaction(...args));
+
+export const deleteSlaughterRecord = (
+  ...args: Parameters<typeof deleteSlaughterRecordInTransaction>
+) => inTransaction(() => deleteSlaughterRecordInTransaction(...args));
+
+export const postMeatTransfer = (...args: Parameters<typeof postMeatTransferInTransaction>) =>
+  inTransaction(() => postMeatTransferInTransaction(...args));
+
+export const postPiggerySale = (...args: Parameters<typeof postPiggerySaleInTransaction>) =>
+  inTransaction(() => postPiggerySaleInTransaction(...args));
+
+export const postCookingBatch = (...args: Parameters<typeof postCookingBatchInTransaction>) =>
+  inTransaction(() => postCookingBatchInTransaction(...args));

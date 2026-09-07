@@ -1,0 +1,35 @@
+name: Backend quality
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      EMAIL_PROVIDER: console
+      JWT_SECRET: isolated-ci-secret-not-for-production
+      TEST_MONGO_IMAGE: mongo:8.0.16
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run typecheck:tests
+      - run: npm run test:architecture
+      - run: npm run test:coverage
+      - run: npm run test:integration
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: coverage/
+          retention-days: 14

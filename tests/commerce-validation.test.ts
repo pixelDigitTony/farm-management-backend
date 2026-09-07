@@ -61,7 +61,9 @@ describe("commerce validation", () => {
     const parsed = parse(catalogProductSchema, clothingProduct());
     expect(parsed.variants[0]?.price).toBe(375);
     const missingId = clothingProduct();
-    missingId.variants[0] = { ...missingId.variants[0], variantId: undefined as never };
+    const variant = missingId.variants[0];
+    if (!variant) throw new Error("Expected a variant fixture");
+    missingId.variants[0] = { ...variant, variantId: undefined as never };
     expect(
       normalizeProductInput(parse(catalogProductSchema, missingId)).variants[0]?.variantId,
     ).toBeTruthy();

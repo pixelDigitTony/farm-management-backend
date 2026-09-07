@@ -1,6 +1,7 @@
 import { Router } from "express";
 import mongoose, { type Model } from "mongoose";
 import { HttpError } from "../lib/http-error.js";
+import { resourceQuery, resourceUpdates } from "../lib/resource-input.js";
 import { getOwner } from "../middleware/auth.js";
 import {
   CashAccount,
@@ -73,6 +74,7 @@ const protectedUpdateFields: Record<string, Set<string>> = {
     "statusReason",
   ]),
   "inventory-items": new Set(["currentStockCached"]),
+  "cash-accounts": new Set(["currentBalanceCached", "openingBalance"]),
 };
 
 async function findDeleteBlocker(
@@ -82,6 +84,14 @@ async function findDeleteBlocker(
 ) {
   const scoped = { businessId };
   const checks: Record<string, Array<[Model<any>, Record<string, unknown>, string]>> = {
+    "cash-accounts": [
+      [
+        CashTransaction,
+        { ...scoped, $or: [{ accountId: id }, { fromAccountId: id }, { toAccountId: id }] },
+        "cash transactions",
+      ],
+      [Expense, { ...scoped, paymentAccountIdCached: id }, "expense payments"],
+    ],
     pigs: [
       [
         Expense,
@@ -117,22 +127,21 @@ async function findDeleteBlocker(
 resourceRouter.get("/:resource", async (request, response) => {
   const owner = getOwner(request);
   const model = getModel(request.params.resource);
-  const page = Math.max(1, Number(request.query.page ?? 1));
-  const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 50)));
-  const filter: Record<string, unknown> = { businessId: owner.businessId };
-  for (const [key, value] of Object.entries(request.query)) {
-    if (["page", "limit", "sort"].includes(key) || typeof value !== "string") continue;
+  const fields = new Set(Object.keys(model.schema.paths));
+  const { page, limit, filter: inputFilter, sort } = resourceQuery(request.query, fields);
+  const filter: Record<string, unknown> = { ...inputFilter, businessId: owner.businessId };
+  for (const [key, value] of Object.entries(inputFilter)) {
     if (key.endsWith("Date") && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
       const from = new Date(`${value}T00:00:00.000Z`);
       const to = new Date(from);
       to.setUTCDate(to.getUTCDate() + 1);
       filter[key] = { $gte: from, $lt: to };
-    } else filter[key] = value;
+    }
   }
   const [items, total] = await Promise.all([
     model
       .find(filter)
-      .sort((request.query.sort as string) || "-createdAt")
+      .sort(sort)
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),
@@ -155,8 +164,12 @@ resourceRouter.post("/:resource", async (request, response) => {
   const owner = getOwner(request);
   if (postingManagedCreateResources.has(request.params.resource))
     throw new HttpError(409, "Use the matching transaction operation to create this record safely");
+  const input = resourceUpdates(request.body);
+  if (request.params.resource === "inventory-items") input.currentStockCached = 0;
+  if (request.params.resource === "cash-accounts")
+    input.currentBalanceCached = input.openingBalance ?? 0;
   const item = await getModel(request.params.resource).create({
-    ...request.body,
+    ...input,
     businessId: owner.businessId,
   });
   response.status(201).json(item);
@@ -172,15 +185,10 @@ resourceRouter.patch("/:resource/:id", async (request, response) => {
     .findOne({ _id: request.params.id, businessId: owner.businessId })
     .lean();
   if (!before) throw new HttpError(404, "Record not found");
-  const { businessId: _ignored, _id: _ignoredId, ...updates } = request.body;
-  const blockedFields = Object.keys(updates).filter((field) =>
-    protectedUpdateFields[request.params.resource]?.has(field),
-  );
-  if (blockedFields.length)
-    throw new HttpError(409, `Use the matching operation to change: ${blockedFields.join(", ")}`);
+  const updates = resourceUpdates(request.body, protectedUpdateFields[request.params.resource]);
   const item = await model.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
-    updates,
+    { $set: updates },
     { new: true, runValidators: true },
   );
   response.json(item);

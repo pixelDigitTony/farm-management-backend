@@ -24,7 +24,15 @@ function runAuditedRequest(
   response.statusCode = status;
   response.json = vi.fn(() => response) as Response["json"];
   const next = vi.fn(() => {
-    request.owner = { userId, businessId };
+    request.owner = {
+      userId,
+      businessId,
+      sessionId: new mongoose.Types.ObjectId(),
+      role: 0,
+      status: "ACTIVE",
+      isApproved: true,
+      emailVerified: true,
+    };
     response.json(responseBody);
     response.emit("finish");
   }) as unknown as NextFunction;

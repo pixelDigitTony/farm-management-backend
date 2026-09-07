@@ -55,3 +55,13 @@ export const verificationLimiter = rateLimit({
   legacyHeaders: false,
   handler: jsonHandler,
 });
+
+export const credentialChangeLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 5,
+  keyGenerator: (request) => `${request.owner?.businessId}:${request.owner?.userId}`,
+  skipSuccessfulRequests: true,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: jsonHandler,
+});

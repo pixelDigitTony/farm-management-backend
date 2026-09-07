@@ -10,7 +10,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "biome check . && tsc --noEmit",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:architecture": "node scripts/check-architecture.mjs",
+    "test:load": "k6 run tests/performance/api.k6.js",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
+    "test:serve": "NODE_ENV=test EMAIL_PROVIDER=console JWT_SECRET=isolated-test-secret-not-for-production tsx tests/support/server.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -31,6 +37,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
+    "@swc/core": "^1.16.2",
     "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
@@ -39,7 +46,11 @@
     "@types/morgan": "^1.9.10",
     "@types/node": "^26.2.0",
     "@types/supertest": "^7.2.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "dependency-cruiser": "^18.2.0",
+    "fast-check": "^4.9.0",
     "supertest": "^7.2.2",
+    "testcontainers": "^12.1.0",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"

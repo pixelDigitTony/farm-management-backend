@@ -40,6 +40,13 @@ const envSchema = v.object({
 
 const parsedEnv = v.parse(envSchema, process.env);
 
+if (
+  parsedEnv.NODE_ENV === "production" &&
+  (!process.env.JWT_SECRET || parsedEnv.JWT_SECRET === "development-only-change-this-secret")
+) {
+  throw new Error("Production requires an explicitly configured JWT_SECRET");
+}
+
 export const resendEmailConfigured = Boolean(
   parsedEnv.RESEND_API_KEY && parsedEnv.RESEND_EMAIL_FROM,
 );

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import * as v from "valibot";
+import { isCalendarDate } from "../lib/business-date.js";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
 import { Business, CalendarTodo, User } from "../models/index.js";
@@ -13,7 +14,7 @@ import {
 export const calendarTodoRouter = Router();
 
 function validDate(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  return typeof value === "string" && isCalendarDate(value);
 }
 
 async function requireBusinessUser(businessId: mongoose.Types.ObjectId, userId: string | null) {
