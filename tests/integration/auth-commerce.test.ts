@@ -56,7 +56,8 @@ describe("real authentication and public checkout", () => {
   });
   it("issues an HttpOnly refresh cookie and refuses revoked sessions", async () => {
     const result = await login();
-    expect(result.headers["set-cookie"].join(";")).toContain("HttpOnly");
+    const cookies = result.get("Set-Cookie");
+    expect(cookies?.join(";")).toContain("HttpOnly");
     await request(app).get("/api/auth/me").auth(result.body.token, { type: "bearer" }).expect(200);
     await AuthSession.updateMany(
       { userId: fixture.user.id },
@@ -105,7 +106,9 @@ describe("real authentication and public checkout", () => {
       basePrice: 100,
     });
     const body = orderInput("foreign_product_checkout_request");
-    body.items[0] = { ...body.items[0]!, sourceId: foreign.id };
+    const item = body.items[0];
+    if (!item) throw new Error("Missing fixture order item");
+    body.items[0] = { ...item, sourceId: foreign.id };
     await request(app).post("/api/public/landing-pages/test-farm/orders").send(body).expect(422);
   });
   it("reserves and restores stock exactly once through concurrent status transitions", async () => {

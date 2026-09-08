@@ -675,7 +675,7 @@ async function postSlaughterRecordInTransaction(
         },
       },
     );
-    const movement = await InventoryMovement.create({
+    await InventoryMovement.create({
       businessId,
       movementNumber: reference("PROD"),
       movementDate: input.slaughterDate,

@@ -45,7 +45,9 @@ const profiles = {
 if (!profiles[mode]) throw new Error("Unknown LOAD_MODE");
 const businessFailures = new Rate("business_failures");
 const successfulOperations = new Counter("successful_operations");
+const sessionRenewals = new Counter("session_renewals");
 export const options = {
+  noCookiesReset: true,
   scenarios: { api: { ...profiles[mode], timeUnit: "1s", preAllocatedVUs: 10, maxVUs: 100 } },
   thresholds: {
     business_failures: ["rate<0.01"],
@@ -54,9 +56,33 @@ export const options = {
     http_req_duration: [`p(95)<${__ENV.P95_MS || 500}`],
     dropped_iterations: ["count==0"],
     checks: ["rate>0.99"],
+    ...(__ENV.REQUIRE_SESSION_RENEWAL === "1" ? { session_renewals: ["count>0"] } : {}),
   },
 };
 export function setup() {
+  const fixture = http.get(`${baseURL}/__test/fixture`);
+  if (fixture.status !== 200 || fixture.json("kind") !== "farm-disposable-fixture-v1")
+    throw new Error("Load testing requires the newly seeded Testcontainer fixture server");
+}
+let token;
+let authenticatedAt = 0;
+const refreshAfterMs = Number(__ENV.REFRESH_AFTER_SECONDS || 600) * 1000;
+if (!Number.isFinite(refreshAfterMs) || refreshAfterMs < 1000)
+  throw new Error("REFRESH_AFTER_SECONDS must be at least 1");
+
+function accessToken() {
+  if (token && Date.now() - authenticatedAt < refreshAfterMs) return token;
+  if (token) {
+    const refreshed = http.post(`${baseURL}/auth/refresh`, null, {
+      tags: { operation: "session-refresh" },
+    });
+    if (refreshed.status !== 200 || !refreshed.json("token"))
+      throw new Error("Fixture session renewal failed");
+    token = refreshed.json("token");
+    sessionRenewals.add(1);
+    authenticatedAt = Date.now();
+    return token;
+  }
   const result = http.post(
     `${baseURL}/auth/login`,
     JSON.stringify({
@@ -64,14 +90,23 @@ export function setup() {
       email: "owner@example.test",
       password: "Test-owner-password-2026",
     }),
-    { headers: { "Content-Type": "application/json" } },
+    { headers: { "Content-Type": "application/json" }, tags: { operation: "session-login" } },
   );
   if (result.status !== 200 || !result.json("token")) throw new Error("Fixture login failed");
-  return { token: result.json("token") };
+  token = result.json("token");
+  authenticatedAt = Date.now();
+  return token;
 }
-export default function (data) {
+export default function () {
+  let authorization;
+  try {
+    authorization = accessToken();
+  } catch (error) {
+    businessFailures.add(true);
+    throw error;
+  }
   const response = http.get(`${baseURL}/resources/inventory-items?limit=50`, {
-    headers: { Authorization: `Bearer ${data.token}` },
+    headers: { Authorization: `Bearer ${authorization}` },
     tags: { operation: "inventory-list" },
   });
   const valid = check(response, {

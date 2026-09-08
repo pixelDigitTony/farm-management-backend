@@ -14,7 +14,7 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:architecture": "node scripts/check-architecture.mjs",
-    "test:load": "k6 run tests/performance/api.k6.js",
+    "test:load": "node scripts/run-load.mjs",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "test:serve": "NODE_ENV=test EMAIL_PROVIDER=console JWT_SECRET=isolated-test-secret-not-for-production tsx tests/support/server.ts"
   },
