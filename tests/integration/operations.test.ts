@@ -7,10 +7,16 @@ import { errorHandler } from "../../src/middleware/errors.js";
 import {
   CashAccount,
   CashTransaction,
+  Contact,
   Expense,
   InventoryItem,
   InventoryLot,
   InventoryMovement,
+  MenuItem,
+  Pig,
+  PigBatch,
+  PigMeasurement,
+  Recipe,
 } from "../../src/models/index.js";
 import { resourceRouter } from "../../src/routes/resource.routes.js";
 import {
@@ -232,6 +238,146 @@ describe("transactional inventory and cash", () => {
 });
 
 describe("tenant-safe resource API", () => {
+  it("scopes source contacts on batch creation and pig updates", async () => {
+    const own = await Contact.create({
+      businessId,
+      contactCode: "OWN",
+      name: "Own supplier",
+      types: ["SUPPLIER"],
+    });
+    const foreign = await Contact.create({
+      businessId: otherBusinessId,
+      contactCode: "OTHER",
+      name: "Other supplier",
+      types: ["SUPPLIER"],
+    });
+    await request(app)
+      .post("/resources/pig-batches")
+      .send({ batchCode: "NEW", name: "New", sourceContactId: foreign.id })
+      .expect(422);
+    expect(await PigBatch.countDocuments()).toBe(0);
+    const batch = await request(app)
+      .post("/resources/pig-batches")
+      .send({ batchCode: "NEW", name: "New", sourceContactId: own.id })
+      .expect(201);
+    await request(app)
+      .patch(`/resources/pig-batches/${batch.body.id}`)
+      .send({ sourceContactId: foreign.id })
+      .expect(422);
+    const pig = await Pig.create({ businessId, pigCode: "OWN" });
+    await request(app)
+      .patch(`/resources/pigs/${pig.id}`)
+      .send({ sourceContactId: foreign.id })
+      .expect(422);
+    await request(app)
+      .patch(`/resources/pigs/${pig.id}`)
+      .send({ sourceContactId: own.id })
+      .expect(200);
+    expect(String((await Pig.findById(pig.id))?.sourceContactId)).toBe(own.id);
+  });
+  it("rejects foreign and missing recipe references without changing a menu item", async () => {
+    const own = await Recipe.create({ businessId, recipeCode: "OWN", name: "Own recipe" });
+    const foreign = await Recipe.create({
+      businessId: otherBusinessId,
+      recipeCode: "OTHER",
+      name: "Other recipe",
+    });
+    const menu = await MenuItem.create({
+      businessId,
+      menuCode: "MENU",
+      name: "Original",
+      recipeId: own.id,
+    });
+    for (const recipeId of [foreign.id, new mongoose.Types.ObjectId().toHexString(), "invalid"]) {
+      await request(app)
+        .patch(`/resources/menu-items/${menu.id}`)
+        .send({ name: "Changed", recipeId })
+        .expect(422);
+    }
+    expect((await MenuItem.findById(menu.id))?.name).toBe("Original");
+    await request(app)
+      .post("/resources/menu-items")
+      .send({ menuCode: "NEW", name: "New", recipeId: foreign.id })
+      .expect(422);
+    expect(await MenuItem.countDocuments()).toBe(1);
+    await request(app)
+      .patch(`/resources/menu-items/${menu.id}`)
+      .send({ recipeId: own.id, name: "Valid change" })
+      .expect(200);
+  });
+
+  it("checks every recipe ingredient and accepts repeated references to an owned item", async () => {
+    const { item } = await seed();
+    const foreign = await InventoryItem.create({
+      businessId: otherBusinessId,
+      itemCode: "OTHER",
+      name: "Other",
+      category: "FEED",
+      baseUnit: "KG",
+      businessUnit: "PIGGERY",
+    });
+    for (const ingredients of [
+      [{ inventoryItemId: item.id }, { inventoryItemId: foreign.id }],
+      [{}],
+      [null],
+      null,
+    ]) {
+      await request(app)
+        .post("/resources/recipes")
+        .send({ recipeCode: "NEW", name: "Recipe", ingredients })
+        .expect(422);
+    }
+    expect(await Recipe.countDocuments()).toBe(0);
+    const result = await request(app)
+      .post("/resources/recipes")
+      .send({
+        recipeCode: "NEW",
+        name: "Recipe",
+        ingredients: [{ inventoryItemId: item.id }, { inventoryItemId: item.id.toUpperCase() }],
+      })
+      .expect(201);
+    await request(app)
+      .patch(`/resources/recipes/${result.body.id}`)
+      .send({ ingredients: [{ inventoryItemId: foreign.id }] })
+      .expect(422);
+    expect((await Recipe.findById(result.body.id))?.ingredients).toHaveLength(2);
+    await request(app)
+      .patch(`/resources/recipes/${result.body.id}`)
+      .send({ name: "Rename only" })
+      .expect(200);
+    await request(app)
+      .patch(`/resources/recipes/${result.body.id}`)
+      .send({ ingredients: [] })
+      .expect(200);
+  });
+
+  it("rejects foreign measurement targets and pig batch changes", async () => {
+    const batch = await PigBatch.create({
+      businessId: otherBusinessId,
+      batchCode: "OTHER",
+      name: "Other",
+    });
+    const foreign = await Pig.create({ businessId: otherBusinessId, pigCode: "OTHER" });
+    const own = await Pig.create({ businessId, pigCode: "OWN" });
+    await request(app).patch(`/resources/pigs/${own.id}`).send({ batchId: batch.id }).expect(422);
+    for (const target of [{ pigId: foreign.id }, { batchId: batch.id }]) {
+      await request(app)
+        .post("/resources/pig-measurements")
+        .send({ measurementDate: "2026-09-01", measurementType: "INDIVIDUAL", ...target })
+        .expect(422);
+    }
+    expect(await PigMeasurement.countDocuments()).toBe(0);
+    await request(app).patch(`/resources/pigs/${own.id}`).send({ batchId: null }).expect(200);
+    const result = await request(app)
+      .post("/resources/pig-measurements")
+      .send({ measurementDate: "2026-09-01", measurementType: "INDIVIDUAL", pigId: own.id })
+      .expect(201);
+    await request(app)
+      .patch(`/resources/pig-measurements/${result.body.id}`)
+      .send({ pigId: foreign.id })
+      .expect(422);
+    expect(String((await PigMeasurement.findById(result.body.id))?.pigId)).toBe(own.id);
+  });
   it("isolates reads, refuses filter overrides, and prevents operator updates", async () => {
     const { item } = await seed();
     const foreign = await InventoryItem.create({

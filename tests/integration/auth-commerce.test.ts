@@ -141,4 +141,35 @@ describe("real authentication and public checkout", () => {
       await Business.updateOne({ _id: fixture.business.id }, { $set: { isArchived: false } });
     }
   });
+  it("allows only one order to reserve the last unit, with no stuck lock on the loser", async () => {
+    const productId = fixture.products[0]?.id;
+    await CatalogProduct.updateOne({ _id: productId }, { $set: { availableQuantity: 1 } });
+    const orderIds: string[] = [];
+    for (const key of ["last_unit_first_request", "last_unit_second_request"]) {
+      const result = await request(app)
+        .post("/api/public/landing-pages/test-farm/orders")
+        .send(orderInput(key))
+        .expect(201);
+      const order = await CustomerOrder.findOne({ orderNumber: result.body.orderNumber });
+      if (!order) throw new Error("Missing checkout order");
+      orderIds.push(order.id);
+    }
+    const outcomes = await Promise.allSettled(
+      orderIds.map((id) =>
+        updateOrderStatus(fixture.business._id, fixture.user._id, id, { status: "CONFIRMED" }),
+      ),
+    );
+    expect(outcomes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect((await CatalogProduct.findById(productId))?.availableQuantity).toBe(0);
+    const orders = await CustomerOrder.find({ _id: { $in: orderIds } }).select("+transitionLock");
+    expect(orders.filter((order) => order.stockReserved)).toHaveLength(1);
+    expect(orders.every((order) => order.transitionLock === null)).toBe(true);
+    const winner = orders.find((order) => order.stockReserved);
+    if (!winner) throw new Error("No order reserved the last unit");
+    await updateOrderStatus(fixture.business._id, fixture.user._id, winner.id, {
+      status: "CANCELLED",
+      cancellationReason: "Restore test stock",
+    });
+    expect((await CatalogProduct.findById(productId))?.availableQuantity).toBe(1);
+  });
 });

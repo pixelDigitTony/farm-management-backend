@@ -23,6 +23,7 @@ import {
   SlaughterRecord,
   SlaughterSetting,
 } from "../models/index.js";
+import { assertResourceReferences } from "../services/resource-reference.service.js";
 
 const resources: Record<string, Model<any>> = {
   contacts: Contact,
@@ -168,6 +169,7 @@ resourceRouter.post("/:resource", async (request, response) => {
   if (request.params.resource === "inventory-items") input.currentStockCached = 0;
   if (request.params.resource === "cash-accounts")
     input.currentBalanceCached = input.openingBalance ?? 0;
+  await assertResourceReferences(request.params.resource, input, owner.businessId);
   const item = await getModel(request.params.resource).create({
     ...input,
     businessId: owner.businessId,
@@ -186,6 +188,7 @@ resourceRouter.patch("/:resource/:id", async (request, response) => {
     .lean();
   if (!before) throw new HttpError(404, "Record not found");
   const updates = resourceUpdates(request.body, protectedUpdateFields[request.params.resource]);
+  await assertResourceReferences(request.params.resource, updates, owner.businessId);
   const item = await model.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
     { $set: updates },
