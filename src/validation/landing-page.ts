@@ -37,6 +37,7 @@ const heroComponent = v.object({
   type: v.literal("HERO"),
   enabled,
   width,
+  buttonTextColor: v.optional(v.union([v.literal(""), color])),
   content: v.object({
     eyebrow: shortText(80),
     title: requiredText(120),
@@ -54,6 +55,7 @@ const textComponent = v.object({
   type: v.literal("TEXT"),
   enabled,
   width,
+  buttonTextColor: v.optional(v.union([v.literal(""), color])),
   content: v.object({
     heading: requiredText(120),
     body: shortText(2000),
@@ -66,6 +68,7 @@ const menuComponent = v.object({
   type: v.literal("MENU"),
   enabled,
   width,
+  buttonTextColor: v.optional(v.union([v.literal(""), color])),
   content: v.object({
     heading: requiredText(120),
     body: shortText(500),
@@ -85,6 +88,7 @@ const catalogComponent = v.object({
   type: v.literal("CATALOG"),
   enabled,
   width,
+  buttonTextColor: v.optional(v.union([v.literal(""), color])),
   content: v.object({
     heading: requiredText(120),
     body: shortText(500),
@@ -97,7 +101,7 @@ const catalogComponent = v.object({
         "Select each catalog item once",
       ),
     ),
-    displayMode,
+    displayMode: v.optional(v.picklist(["VERTICAL", "HORIZONTAL"]), "HORIZONTAL"),
     columns: v.optional(v.picklist([2, 3, 4]), 3),
   }),
 });
@@ -107,6 +111,7 @@ const galleryComponent = v.object({
   type: v.literal("GALLERY"),
   enabled,
   width,
+  buttonTextColor: v.optional(v.union([v.literal(""), color])),
   content: v.object({
     heading: requiredText(120),
     mediaUrls: v.pipe(
@@ -123,6 +128,7 @@ const contactComponent = v.object({
   type: v.literal("CONTACT"),
   enabled,
   width,
+  buttonTextColor: v.optional(v.union([v.literal(""), color])),
   content: v.object({
     heading: requiredText(120),
     body: shortText(500),
@@ -141,6 +147,7 @@ const ctaComponent = v.object({
   type: v.literal("CTA"),
   enabled,
   width,
+  buttonTextColor: v.optional(v.union([v.literal(""), color])),
   content: v.object({
     heading: requiredText(120),
     body: shortText(500),

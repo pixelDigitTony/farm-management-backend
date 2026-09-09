@@ -2,6 +2,7 @@ import { parse } from "valibot";
 import { describe, expect, it } from "vitest";
 import {
   catalogItemKey,
+  hasEnabledCatalog,
   isOrderTransitionAllowed,
   normalizeProductInput,
   selectedCatalogReferences,
@@ -103,7 +104,7 @@ describe("commerce validation", () => {
     ).toBe("Davao City");
   });
 
-  it("extracts only visible orderable references and deduplicates them", () => {
+  it("keeps manual menu references and detects automatic catalog visibility", () => {
     const snapshot = {
       sections: [
         {
@@ -136,7 +137,13 @@ describe("commerce validation", () => {
       ],
     };
     const references = selectedCatalogReferences(snapshot);
-    expect(references.map(catalogItemKey)).toEqual(["MENU_ITEM:menu-1", "PRODUCT:product-1"]);
+    expect(references.map(catalogItemKey)).toEqual(["MENU_ITEM:menu-1"]);
+    expect(hasEnabledCatalog(snapshot)).toBe(true);
+    expect(hasEnabledCatalog({ sections: [{ ...snapshot.sections[0], enabled: false }] })).toBe(
+      false,
+    );
+    expect(hasEnabledCatalog({ components: [{ type: "CATALOG", enabled: false }] })).toBe(false);
+    expect(hasEnabledCatalog({ components: [{ type: "CATALOG" }] })).toBe(true);
   });
 
   it("enforces the forward order lifecycle", () => {

@@ -1,6 +1,7 @@
 import { parse } from "valibot";
 import { describe, expect, it } from "vitest";
 import {
+  landingPageComponentSchema,
   landingPageSectionSchema,
   landingPageSettingsSchema,
   landingPageVariantUpdateSchema,
@@ -51,7 +52,7 @@ function variant() {
 }
 
 describe("landing-page validation", () => {
-  it("preserves scroll settings and defaults older sections to unlimited vertical grids", () => {
+  it("preserves scroll settings and defaults older sections to unlimited height and catalogs to horizontal rows", () => {
     const section = {
       ...variant().sections[0],
       maxHeight: 480,
@@ -72,7 +73,7 @@ describe("landing-page validation", () => {
     expect(parsed.maxHeight).toBe(480);
     expect(parsed.components.map((component) => component.content)).toMatchObject([
       { displayMode: "HORIZONTAL" },
-      { displayMode: "VERTICAL" },
+      { displayMode: "HORIZONTAL" },
     ]);
     expect(parse(landingPageSectionSchema, { ...section, maxHeight: undefined }).maxHeight).toBe(0);
     for (const maxHeight of [-1, 3001, 1.5, Infinity, "480"]) {
@@ -221,4 +222,19 @@ describe("landing-page validation", () => {
       }),
     ).toThrow();
   });
+});
+
+it("preserves component button colors and defaults catalog rows to horizontal", () => {
+  const component = {
+    id: "catalog",
+    type: "CATALOG",
+    buttonTextColor: "#123456",
+    content: { heading: "Products", body: "", catalogItemRefs: [] },
+  };
+  const parsed = parse(landingPageComponentSchema, component);
+  expect(parsed.buttonTextColor).toBe("#123456");
+  if (parsed.type === "CATALOG") expect(parsed.content.displayMode).toBe("HORIZONTAL");
+  expect(() =>
+    parse(landingPageComponentSchema, { ...component, buttonTextColor: "invalid" }),
+  ).toThrow();
 });

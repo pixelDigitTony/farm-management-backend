@@ -167,20 +167,28 @@ export function selectedCatalogReferences(snapshot: any): CatalogItemReference[]
         for (const sourceId of component.content.menuItemIds)
           references.push({ sourceType: "MENU_ITEM", sourceId: String(sourceId) });
       }
-      if (component?.type === "CATALOG" && Array.isArray(component?.content?.catalogItemRefs)) {
-        for (const reference of component.content.catalogItemRefs) {
-          if (
-            (reference?.sourceType === "MENU_ITEM" || reference?.sourceType === "PRODUCT") &&
-            typeof reference?.sourceId === "string"
-          )
-            references.push(reference);
-        }
-      }
     }
   }
   return [
     ...new Map(references.map((reference) => [catalogItemKey(reference), reference])).values(),
   ];
+}
+
+export function hasEnabledCatalog(snapshot: any): boolean {
+  return publishedSections(snapshot).some(
+    (section: any) =>
+      section?.enabled !== false &&
+      Array.isArray(section?.components) &&
+      section.components.some(
+        (component: any) => component?.enabled !== false && component?.type === "CATALOG",
+      ),
+  );
+}
+
+export async function getPublishedCatalogItems(businessId: Types.ObjectId, snapshot: any) {
+  return hasEnabledCatalog(snapshot)
+    ? getBuilderCatalogItems(businessId)
+    : getPublicCatalogItems(businessId, selectedCatalogReferences(snapshot));
 }
 
 async function publishedOrderingContext(slug: string) {
@@ -197,7 +205,12 @@ async function publishedOrderingContext(slug: string) {
     landingPageCommerceSettingsSchema,
     snapshot.commerce ?? defaultLandingPageCommerceSettings,
   );
-  return { page, commerce, allowedReferences: selectedCatalogReferences(snapshot) };
+  const items = await getPublishedCatalogItems(page.businessId, snapshot);
+  return {
+    page,
+    commerce,
+    allowedReferences: items.map(({ sourceType, sourceId }) => ({ sourceType, sourceId })),
+  };
 }
 
 function normalizedLines(lines: PublicOrderInput["items"]) {

@@ -12,7 +12,7 @@ import {
 } from "../models/index.js";
 import {
   getBuilderCatalogItems,
-  getPublicCatalogItems,
+  getPublishedCatalogItems,
   selectedCatalogReferences,
 } from "../services/commerce.service.js";
 import { createSection, defaultLandingSections } from "../services/landing-page-template.js";
@@ -335,10 +335,7 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
   })
     .select("name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing")
     .lean();
-  const catalogItems = await getPublicCatalogItems(
-    page.businessId,
-    selectedCatalogReferences({ sections }),
-  );
+  const catalogItems = await getPublishedCatalogItems(page.businessId, { sections });
   response.set("Cache-Control", "no-store");
   response.json({
     slug: page.slug,
