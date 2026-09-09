@@ -3,17 +3,12 @@ import mongoose from "mongoose";
 import * as v from "valibot";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
-import {
-  Business,
-  CatalogProduct,
-  LandingPage,
-  LandingPageVariant,
-  MenuItem,
-} from "../models/index.js";
+import { Business, LandingPage, LandingPageVariant } from "../models/index.js";
 import {
   getBuilderCatalogItems,
+  getLandingMenuItems,
   getPublishedCatalogItems,
-  selectedCatalogReferences,
+  hasEnabledCatalog,
 } from "../services/commerce.service.js";
 import { createSection, defaultLandingSections } from "../services/landing-page-template.js";
 import {
@@ -78,63 +73,11 @@ async function getPage(businessId: mongoose.Types.ObjectId) {
   return page;
 }
 
-function selectedMenuIds(sections: LandingPageVariantInput["sections"]) {
-  return [
-    ...new Set(
-      sections.flatMap((section) =>
-        section.components.flatMap((component) =>
-          component.type === "MENU" ? component.content.menuItemIds : [],
-        ),
-      ),
-    ),
-  ];
-}
-
-async function validateMenuItems(
-  businessId: mongoose.Types.ObjectId,
-  sections: LandingPageVariantInput["sections"],
-) {
-  const ids = selectedMenuIds(sections);
-  if (ids.some((id) => !mongoose.isValidObjectId(id)))
-    throw new HttpError(422, "Select valid menu items");
-  if (!ids.length) return;
-  const count = await MenuItem.countDocuments({ _id: { $in: ids }, businessId, isActive: true });
-  if (count !== ids.length) throw new HttpError(422, "One or more menu items are unavailable");
-}
-
-async function validateCatalogItems(
-  businessId: mongoose.Types.ObjectId,
-  sections: LandingPageVariantInput["sections"],
-) {
-  const references = selectedCatalogReferences({ sections }).filter(
-    (reference) => reference.sourceType === "PRODUCT" || reference.sourceType === "MENU_ITEM",
-  );
-  const menuIds = references
-    .filter((reference) => reference.sourceType === "MENU_ITEM")
-    .map((reference) => reference.sourceId);
-  const productIds = references
-    .filter((reference) => reference.sourceType === "PRODUCT")
-    .map((reference) => reference.sourceId);
-  if ([...menuIds, ...productIds].some((id) => !mongoose.isValidObjectId(id)))
-    throw new HttpError(422, "Select valid catalog items");
-  const [menuCount, productCount] = await Promise.all([
-    MenuItem.countDocuments({ _id: { $in: menuIds }, businessId, isActive: true }),
-    CatalogProduct.countDocuments({ _id: { $in: productIds }, businessId, isActive: true }),
-  ]);
-  if (menuCount !== new Set(menuIds).size || productCount !== new Set(productIds).size)
-    throw new HttpError(422, "One or more catalog items are unavailable");
-}
-
 async function builderPayload(businessId: mongoose.Types.ObjectId) {
   const [page, variants, menuItems, catalogItems] = await Promise.all([
     LandingPage.findOne({ businessId }).lean(),
     LandingPageVariant.find({ businessId }).sort({ createdAt: 1 }).lean(),
-    MenuItem.find({ businessId, isActive: true })
-      .select(
-        "name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing isAvailable",
-      )
-      .sort({ name: 1 })
-      .lean(),
+    getLandingMenuItems(businessId),
     getBuilderCatalogItems(businessId),
   ]);
   const normalizedVariants = variants.map((variant) => serializedVariant(variant));
@@ -228,8 +171,6 @@ landingPageRouter.patch("/variants/:id", async (request, response) => {
     ...request.body,
     sections: normalizedSections(request.body),
   });
-  await validateMenuItems(owner.businessId, input.sections);
-  await validateCatalogItems(owner.businessId, input.sections);
   const variant = await LandingPageVariant.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
     {
@@ -277,8 +218,6 @@ landingPageRouter.post("/variants/:id/publish", async (request, response) => {
     )
   )
     throw new HttpError(422, "Show at least one component before publishing");
-  await validateMenuItems(owner.businessId, input.sections);
-  await validateCatalogItems(owner.businessId, input.sections);
   page.isPublished = true;
   page.publishedVariantId = variant._id;
   page.publishedSnapshot = {
@@ -326,15 +265,9 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     snapshot.commerce ?? defaultLandingPageCommerceSettings,
   );
   const sections = normalizedSections(snapshot);
-  const ids = selectedMenuIds(sections as LandingPageVariantInput["sections"]);
-  const menuItems = await MenuItem.find({
-    _id: { $in: ids },
-    businessId: page.businessId,
-    isActive: true,
-    isAvailable: true,
-  })
-    .select("name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing")
-    .lean();
+  const menuItems = hasEnabledCatalog({ sections }, "MENU")
+    ? await getLandingMenuItems(page.businessId)
+    : [];
   const catalogItems = await getPublishedCatalogItems(page.businessId, { sections });
   response.set("Cache-Control", "no-store");
   response.json({

@@ -47,6 +47,7 @@ const menuItemSchema = new Schema(
     calculatedFoodCostPercentCached: money,
     suggestedSellingPriceCached: money,
     isAvailable: { type: Boolean, default: true },
+    showOnLandingPage: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
   },
   schemaOptions,

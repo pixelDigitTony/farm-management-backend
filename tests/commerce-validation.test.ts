@@ -1,11 +1,9 @@
 import { parse } from "valibot";
 import { describe, expect, it } from "vitest";
 import {
-  catalogItemKey,
   hasEnabledCatalog,
   isOrderTransitionAllowed,
   normalizeProductInput,
-  selectedCatalogReferences,
 } from "../src/services/commerce.service.js";
 import { catalogProductSchema, publicOrderSchema } from "../src/validation/commerce.js";
 
@@ -104,7 +102,7 @@ describe("commerce validation", () => {
     ).toBe("Davao City");
   });
 
-  it("keeps manual menu references and detects automatic catalog visibility", () => {
+  it("detects automatic menu and catalog visibility", () => {
     const snapshot = {
       sections: [
         {
@@ -136,8 +134,13 @@ describe("commerce validation", () => {
         },
       ],
     };
-    const references = selectedCatalogReferences(snapshot);
-    expect(references.map(catalogItemKey)).toEqual(["MENU_ITEM:menu-1"]);
+    expect(hasEnabledCatalog(snapshot, "MENU")).toBe(true);
+    expect(hasEnabledCatalog({ components: [{ type: "MENU", enabled: false }] }, "MENU")).toBe(
+      false,
+    );
+    expect(
+      hasEnabledCatalog({ sections: [{ enabled: false, components: [{ type: "MENU" }] }] }, "MENU"),
+    ).toBe(false);
     expect(hasEnabledCatalog(snapshot)).toBe(true);
     expect(hasEnabledCatalog({ sections: [{ ...snapshot.sections[0], enabled: false }] })).toBe(
       false,

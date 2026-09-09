@@ -283,5 +283,6 @@ export const menuRecipeOperationSchema = v.object({
     calculatedFoodCostPercentCached: amount,
     suggestedSellingPriceCached: amount,
     isAvailable: v.optional(v.boolean(), true),
+    showOnLandingPage: v.optional(v.boolean()),
   }),
 });

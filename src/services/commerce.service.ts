@@ -84,52 +84,24 @@ function publicProduct(product: any) {
   };
 }
 
+export async function getLandingMenuItems(businessId: Types.ObjectId) {
+  return MenuItem.find({ businessId, isActive: true, showOnLandingPage: { $ne: false } })
+    .select(
+      "name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing isAvailable",
+    )
+    .sort({ name: 1 })
+    .lean();
+}
+
 export async function getBuilderCatalogItems(businessId: Types.ObjectId) {
   const [menus, products] = await Promise.all([
-    MenuItem.find({ businessId, isActive: true })
-      .select(
-        "name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing isAvailable",
-      )
-      .sort({ name: 1 })
-      .lean(),
+    getLandingMenuItems(businessId),
     CatalogProduct.find({ businessId, isActive: true }).sort({ name: 1 }).lean(),
   ]);
   const pricedProducts = await priceCatalogProducts(businessId, products);
   return [...menus.map(publicMenuItem), ...pricedProducts.map(publicProduct)].sort((left, right) =>
     left.name.localeCompare(right.name),
   );
-}
-
-export async function getPublicCatalogItems(
-  businessId: Types.ObjectId,
-  references: CatalogItemReference[],
-) {
-  const unique = new Map(references.map((reference) => [catalogItemKey(reference), reference]));
-  const menuIds = [...unique.values()]
-    .filter((reference) => reference.sourceType === "MENU_ITEM")
-    .map((reference) => reference.sourceId);
-  const productIds = [...unique.values()]
-    .filter((reference) => reference.sourceType === "PRODUCT")
-    .map((reference) => reference.sourceId);
-  const [menus, products] = await Promise.all([
-    MenuItem.find({ _id: { $in: menuIds }, businessId, isActive: true })
-      .select(
-        "name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing isAvailable",
-      )
-      .lean(),
-    CatalogProduct.find({ _id: { $in: productIds }, businessId, isActive: true }).lean(),
-  ]);
-  const pricedProducts = await priceCatalogProducts(businessId, products);
-  const resolved = new Map(
-    [...menus.map(publicMenuItem), ...pricedProducts.map(publicProduct)].map((item) => [
-      item.key,
-      item,
-    ]),
-  );
-  return [...unique.keys()].flatMap((key) => {
-    const item = resolved.get(key);
-    return item ? [item] : [];
-  });
 }
 
 export function normalizeProductInput(input: CatalogProductInput) {
@@ -157,38 +129,24 @@ function publishedSections(snapshot: any) {
   ];
 }
 
-export function selectedCatalogReferences(snapshot: any): CatalogItemReference[] {
-  const references: CatalogItemReference[] = [];
-  for (const section of publishedSections(snapshot)) {
-    if (section?.enabled === false || !Array.isArray(section?.components)) continue;
-    for (const component of section.components) {
-      if (component?.enabled === false) continue;
-      if (component?.type === "MENU" && Array.isArray(component?.content?.menuItemIds)) {
-        for (const sourceId of component.content.menuItemIds)
-          references.push({ sourceType: "MENU_ITEM", sourceId: String(sourceId) });
-      }
-    }
-  }
-  return [
-    ...new Map(references.map((reference) => [catalogItemKey(reference), reference])).values(),
-  ];
-}
-
-export function hasEnabledCatalog(snapshot: any): boolean {
+export function hasEnabledCatalog(snapshot: any, type: "CATALOG" | "MENU" = "CATALOG"): boolean {
   return publishedSections(snapshot).some(
     (section: any) =>
       section?.enabled !== false &&
       Array.isArray(section?.components) &&
       section.components.some(
-        (component: any) => component?.enabled !== false && component?.type === "CATALOG",
+        (component: any) => component?.enabled !== false && component?.type === type,
       ),
   );
 }
 
 export async function getPublishedCatalogItems(businessId: Types.ObjectId, snapshot: any) {
-  return hasEnabledCatalog(snapshot)
-    ? getBuilderCatalogItems(businessId)
-    : getPublicCatalogItems(businessId, selectedCatalogReferences(snapshot));
+  if (hasEnabledCatalog(snapshot)) return getBuilderCatalogItems(businessId);
+  if (hasEnabledCatalog(snapshot, "MENU")) {
+    const menus = await getLandingMenuItems(businessId);
+    return menus.map(publicMenuItem);
+  }
+  return [];
 }
 
 async function publishedOrderingContext(slug: string) {

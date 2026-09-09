@@ -35,7 +35,7 @@ describe("default landing-page template", () => {
     );
     expect(catalog?.content.displayMode).toBe("HORIZONTAL");
     expect(menu?.content.menuItemIds).toHaveLength(12);
-    expect(menu?.content.displayMode).toBe("VERTICAL");
+    expect(menu?.content.displayMode).toBe("HORIZONTAL");
     expect(components.find((component) => component.type === "GALLERY")?.content.mediaUrls).toEqual(
       ["https://example.com/product.jpg"],
     );

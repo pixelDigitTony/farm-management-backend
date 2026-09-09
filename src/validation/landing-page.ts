@@ -30,7 +30,7 @@ const width = v.optional(v.picklist(["FULL", "TWO_THIRDS", "HALF", "THIRD"]), "F
 const enabled = v.optional(v.boolean(), true);
 const color = v.pipe(v.string(), v.regex(/^#[0-9a-fA-F]{6}$/));
 const inheritedColor = v.optional(v.union([v.literal(""), color]), "");
-const displayMode = v.optional(v.picklist(["VERTICAL", "HORIZONTAL"]), "VERTICAL");
+const displayMode = v.optional(v.picklist(["VERTICAL", "HORIZONTAL"]), "HORIZONTAL");
 
 const heroComponent = v.object({
   id: componentId,

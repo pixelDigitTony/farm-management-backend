@@ -102,7 +102,7 @@ export function defaultLandingSections(
             body: "Choose your favorites and add them to your cart.",
             menuItemIds: menus.map((item) => item.sourceId),
             columns: 3,
-            displayMode: "VERTICAL",
+            displayMode: "HORIZONTAL",
           },
         },
       ],
