@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { type NextFunction, type Request, type Response, Router } from "express";
+import mongoose from "mongoose";
 import * as v from "valibot";
 import { normalizeEmail, normalizePhilippinePhone } from "../lib/auth-utils.js";
-import { addBusinessRole } from "../lib/business-roles.js";
+import { addBusinessRole, type BusinessRole, editBusinessRole } from "../lib/business-roles.js";
 import { HttpError } from "../lib/http-error.js";
 import { allPermissions } from "../lib/permissions.js";
 import { getOwner } from "../middleware/auth.js";
@@ -33,7 +34,7 @@ const permissionsSchema = v.pipe(
   ),
 );
 const roleSchema = v.object({
-  level: roleLevel,
+  level: v.pipe(roleLevel, v.maxValue(97)),
   permissions: v.optional(permissionsSchema, []),
   name: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(60)),
 });
@@ -94,40 +95,76 @@ employeeRouter.get("/", async (request, response) => {
   response.json({ users, business, invites });
 });
 
+async function changeRole(
+  request: Request,
+  change: (roles: BusinessRole[], ownerRole: number) => ReturnType<typeof addBusinessRole>,
+) {
+  const identity = getOwner(request);
+  return mongoose.connection.transaction(async (session) => {
+    const business = await Business.findById(identity.businessId).session(session);
+    if (!business) throw new HttpError(404, "Business was not found");
+    if (identity.role !== 99 && identity.role !== Number(business.ownerRole))
+      throw new HttpError(409, "The owner role changed. Reload and try again");
+    const updated = change(
+      business.roles.map((role: BusinessRole) => ({
+        level: role.level,
+        name: role.name,
+        permissions: role.permissions,
+      })),
+      Number(business.ownerRole),
+    );
+    business.roles = updated.roles;
+    business.ownerRole = updated.ownerRole;
+    await business.save({ session });
+    if (updated.changes.length) {
+      // Resolve all moves against the original level in one update; moves may overlap.
+      const filter = {
+        businessId: identity.businessId,
+        role: { $in: updated.changes.map((change) => change.from) },
+      };
+      const pipeline = [
+        {
+          $set: {
+            role: {
+              $switch: {
+                branches: updated.changes.map((change) => ({
+                  case: { $eq: ["$role", change.from] },
+                  // biome-ignore lint/suspicious/noThenProperty: MongoDB $switch requires this key.
+                  then: change.to,
+                })),
+                default: "$role",
+              },
+            },
+          },
+        },
+      ];
+      await User.updateMany(filter, pipeline, { session, updatePipeline: true });
+      await RegistrationInvite.updateMany(filter, pipeline, { session, updatePipeline: true });
+    }
+    return { roles: updated.roles, ownerRole: updated.ownerRole };
+  });
+}
+
 employeeRouter.post("/roles", async (request, response) => {
-  const owner = getOwner(request);
   const input = v.parse(roleSchema, request.body);
-  const business = await Business.findById(owner.businessId);
-  if (!business) throw new HttpError(404, "Business was not found");
-  const previousOwnerRole = Number(business.ownerRole ?? 0);
-  const result = addBusinessRole(
-    business.roles.map((role: { level: number; name: string; permissions?: string[] }) => ({
-      level: role.level,
-      name: role.name,
-      permissions: role.permissions,
-    })),
-    previousOwnerRole,
-    input,
-  );
-  business.roles = result.roles;
-  business.ownerRole = result.ownerRole;
-  if (result.transferred && owner.role !== 99)
-    await User.updateOne({ _id: owner.userId }, { $set: { role: input.level } });
-  await business.save();
-  response.status(201).json({ roles: business.roles, ownerRole: business.ownerRole });
+  response
+    .status(201)
+    .json(
+      await changeRole(request, (roles, ownerRole) => addBusinessRole(roles, ownerRole, input)),
+    );
 });
 
 employeeRouter.patch("/roles/:level", async (request, response) => {
-  const owner = getOwner(request);
-  const level = v.parse(roleLevel, request.params.level);
-  const { name } = v.parse(v.pick(roleSchema, ["name"]), request.body);
-  const business = await Business.findOneAndUpdate(
-    { _id: owner.businessId, "roles.level": level },
-    { $set: { "roles.$.name": name } },
-    { new: true, runValidators: true },
+  const previousLevel = v.parse(roleLevel, request.params.level);
+  const input = v.parse(
+    v.object({ name: roleSchema.entries.name, level: v.optional(roleLevel) }),
+    request.body,
   );
-  if (!business) throw new HttpError(404, "Role was not found");
-  response.json({ roles: business.roles });
+  response.json(
+    await changeRole(request, (roles, ownerRole) =>
+      editBusinessRole(roles, ownerRole, previousLevel, input),
+    ),
+  );
 });
 
 employeeRouter.put("/roles/:level/permissions", async (request, response) => {

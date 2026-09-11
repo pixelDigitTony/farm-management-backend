@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { errorHandler } from "../../src/middleware/errors.js";
 import { requirePermissions } from "../../src/middleware/permissions.js";
 import { Business, RegistrationInvite, User } from "../../src/models/index.js";
@@ -40,6 +40,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await stop?.();
 });
+afterEach(() => vi.restoreAllMocks());
 beforeEach(async () => {
   if (!mongoose.connection.name.startsWith("farm_test_")) throw new Error("Unsafe test database");
   for (const model of Object.values(mongoose.models)) await model.deleteMany({});
@@ -85,11 +86,11 @@ describe("employee roles and links", () => {
     expect(result.body.roles).toEqual(
       expect.arrayContaining([
         { level: 8, name: "Director", permissions: [] },
-        { level: 5, name: "Owner" },
+        { level: 9, name: "Owner" },
       ]),
     );
-    expect((await User.findById(userId))?.role).toBe(8);
-    requestRole = 8;
+    expect((await User.findById(userId))?.role).toBe(9);
+    requestRole = 9;
     await request(app).get("/employees").expect(200);
   });
   it("renames roles, validates names, and deletes unused roles", async () => {
@@ -197,5 +198,55 @@ describe("role permission enforcement", () => {
     expect(
       business?.roles.find((role: { level: number }) => role.level === 2)?.permissions,
     ).toEqual([]);
+  });
+});
+
+describe("role level migration", () => {
+  it("moves all owner assignments when creating at the owner level", async () => {
+    const link = await invite();
+    await RegistrationInvite.updateOne({ _id: link._id }, { role: 5 });
+    await request(app).post("/employees/roles").send({ level: 5, name: "Manager" }).expect(201);
+    expect((await Business.findById(businessId))?.ownerRole).toBe(6);
+    expect((await User.findById(userId))?.role).toBe(6);
+    expect((await RegistrationInvite.findById(link.id))?.role).toBe(6);
+  });
+  it("moves accounts and invites simultaneously when role levels overlap", async () => {
+    const link = await invite();
+    const ownerLink = await RegistrationInvite.create({
+      businessId,
+      createdBy: userId,
+      role: 5,
+      tokenId: "owner-link",
+    });
+    await User.collection.insertOne({ businessId, role: 1, name: "Staff" });
+    await User.collection.insertOne({ businessId: foreignId, role: 1, name: "Foreign" });
+    await request(app).patch("/employees/roles/1").send({ level: 5, name: "Manager" }).expect(200);
+    expect((await User.findById(userId))?.role).toBe(6);
+    expect((await User.findOne({ name: "Staff" }))?.role).toBe(5);
+    expect((await User.findOne({ name: "Foreign" }))?.role).toBe(1);
+    expect((await RegistrationInvite.findById(link.id))?.role).toBe(5);
+    expect((await RegistrationInvite.findById(ownerLink.id))?.role).toBe(6);
+  });
+  it("enforces the owner edit boundary and regular-role maximum", async () => {
+    await request(app).post("/employees/roles").send({ level: 98, name: "Invalid" }).expect(422);
+    await request(app).patch("/employees/roles/1").send({ level: 98, name: "Invalid" }).expect(422);
+    await request(app).patch("/employees/roles/5").send({ level: 3, name: "Owner" }).expect(422);
+    await request(app).patch("/employees/roles/5").send({ level: 2, name: "Owner" }).expect(200);
+    expect((await User.findById(userId))?.role).toBe(2);
+  });
+  it("rolls back the business and users if invite migration fails", async () => {
+    vi.spyOn(RegistrationInvite, "updateMany").mockRejectedValueOnce(
+      new Error("Injected migration failure"),
+    );
+    await request(app).post("/employees/roles").send({ level: 97, name: "Director" }).expect(500);
+    expect((await Business.findById(businessId))?.ownerRole).toBe(5);
+    expect((await User.findById(userId))?.role).toBe(5);
+  });
+  it("keeps super admin at 99 while moving the business owner to 98", async () => {
+    requestRole = 99;
+    await User.collection.insertOne({ businessId, role: 99, name: "Super" });
+    await request(app).post("/employees/roles").send({ level: 97, name: "Director" }).expect(201);
+    expect((await User.findById(userId))?.role).toBe(98);
+    expect((await User.findOne({ name: "Super" }))?.role).toBe(99);
   });
 });
