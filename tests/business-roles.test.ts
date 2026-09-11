@@ -2,34 +2,31 @@ import { describe, expect, it } from "vitest";
 import { normalizeBusinessName } from "../src/lib/auth-utils.js";
 import { addBusinessRole } from "../src/lib/business-roles.js";
 
-describe("business identity and role ownership", () => {
+describe("business role names", () => {
   it("normalizes company names for uniqueness", () => {
     expect(normalizeBusinessName("  Miss   V Business ")).toBe("miss v business");
   });
-
-  it("transfers Owner to a newly created higher role and renames the former role", () => {
-    const result = addBusinessRole([{ level: 0, name: "Owner" }], 0, {
-      level: 10,
-      name: "Ignored for new owner",
-      previousOwnerRoleName: "Administrator",
+  it("uses the supplied higher-role name without renaming existing roles", () => {
+    const roles = [{ level: 1, name: "Owner" }];
+    const result = addBusinessRole(roles, 1, { level: 10, name: "Director" });
+    expect(result).toEqual({
+      ownerRole: 10,
+      transferred: true,
+      roles: [
+        { level: 10, name: "Director" },
+        { level: 1, name: "Owner" },
+      ],
     });
-    expect(result.ownerRole).toBe(10);
-    expect(result.roles).toEqual([
-      { level: 10, name: "Owner" },
-      { level: 0, name: "Administrator" },
-    ]);
-    expect(result.transferred).toBe(true);
+    expect(roles).toEqual([{ level: 1, name: "Owner" }]);
   });
-
-  it("requires a former-owner role name before transferring ownership", () => {
-    expect(() =>
-      addBusinessRole([{ level: 0, name: "Owner" }], 0, { level: 1, name: "Owner" }),
-    ).toThrow("Name the previous owner role");
+  it("retains ownership when adding a lower role", () => {
+    expect(
+      addBusinessRole([{ level: 10, name: "Director" }], 10, { level: 2, name: "Manager" }),
+    ).toMatchObject({ ownerRole: 10, transferred: false });
   });
-
-  it("reserves the Owner name for the highest numeric role", () => {
+  it("rejects duplicate numeric levels", () => {
     expect(() =>
-      addBusinessRole([{ level: 10, name: "Owner" }], 10, { level: 5, name: "Owner" }),
-    ).toThrow("Only the highest role");
+      addBusinessRole([{ level: 1, name: "Owner" }], 1, { level: 1, name: "Manager" }),
+    ).toThrow("already exists");
   });
 });

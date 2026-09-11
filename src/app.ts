@@ -8,13 +8,9 @@ import { env } from "./config/env.js";
 import { isAllowedCorsOrigin } from "./lib/cors-origin.js";
 import { mongoJsonReplacer } from "./lib/json.js";
 import { auditOwnerInteraction } from "./middleware/activity-audit.js";
-import {
-  requireApproved,
-  requireHighestBusinessRole,
-  requireOwner,
-  requireSuperAdmin,
-} from "./middleware/auth.js";
+import { requireApproved, requireOwner, requireSuperAdmin } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
+import { requirePermissions } from "./middleware/permissions.js";
 import { authLimiter, publicContentLimiter } from "./middleware/rate-limit.js";
 import { activityRouter } from "./routes/activity.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
@@ -70,23 +66,23 @@ app.use(
 );
 app.use("/api", auditOwnerInteraction);
 app.use("/api/admin", requireOwner, requireSuperAdmin, adminRouter);
-app.use("/api/employees", requireOwner, requireApproved, employeeRouter);
-app.use("/api/dashboard", requireOwner, requireApproved, dashboardRouter);
-app.use("/api/calculations", requireOwner, requireApproved, calculationRouter);
-app.use("/api/calendar-todos", requireOwner, requireApproved, calendarTodoRouter);
+app.use("/api/employees", requireOwner, requireApproved, requirePermissions, employeeRouter);
+app.use("/api/dashboard", requireOwner, requireApproved, requirePermissions, dashboardRouter);
+app.use("/api/calculations", requireOwner, requireApproved, requirePermissions, calculationRouter);
 app.use(
-  "/api/landing-page",
+  "/api/calendar-todos",
   requireOwner,
   requireApproved,
-  requireHighestBusinessRole,
-  landingPageRouter,
+  requirePermissions,
+  calendarTodoRouter,
 );
-app.use("/api/catalog", requireOwner, requireApproved, requireHighestBusinessRole, catalogRouter);
-app.use("/api/orders", requireOwner, requireApproved, requireHighestBusinessRole, orderRouter);
-app.use("/api/operations", requireOwner, requireApproved, operationRouter);
-app.use("/api/resources", requireOwner, requireApproved, resourceRouter);
-app.use("/api/reports", requireOwner, requireApproved, reportRouter);
-app.use("/api/settings", requireOwner, requireApproved, settingsRouter);
-app.use("/api/activity", requireOwner, requireApproved, activityRouter);
+app.use("/api/landing-page", requireOwner, requireApproved, requirePermissions, landingPageRouter);
+app.use("/api/catalog", requireOwner, requireApproved, requirePermissions, catalogRouter);
+app.use("/api/orders", requireOwner, requireApproved, requirePermissions, orderRouter);
+app.use("/api/operations", requireOwner, requireApproved, requirePermissions, operationRouter);
+app.use("/api/resources", requireOwner, requireApproved, requirePermissions, resourceRouter);
+app.use("/api/reports", requireOwner, requireApproved, requirePermissions, reportRouter);
+app.use("/api/settings", requireOwner, requireApproved, requirePermissions, settingsRouter);
+app.use("/api/activity", requireOwner, requireApproved, requirePermissions, activityRouter);
 app.use(notFound);
 app.use(errorHandler);

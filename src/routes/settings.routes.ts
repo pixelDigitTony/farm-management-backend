@@ -65,6 +65,14 @@ const slaughterSettingsSchema = v.object({
 export const settingsRouter = Router();
 settingsRouter.use("/account", credentialChangeLimiter);
 
+settingsRouter.get("/slaughter", async (request, response) => {
+  const slaughter = await SlaughterSetting.findOne({
+    businessId: getOwner(request).businessId,
+    isDefault: true,
+  }).lean();
+  response.json({ slaughter });
+});
+
 settingsRouter.get("/", async (request, response) => {
   const owner = getOwner(request);
   const [business, user, slaughter] = await Promise.all([

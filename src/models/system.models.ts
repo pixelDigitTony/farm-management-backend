@@ -139,6 +139,7 @@ const businessSchema = new Schema(
           {
             level: { type: Number, min: 0, max: 98, required: true },
             name: { type: String, required: true, trim: true },
+            permissions: { type: [String], default: undefined },
           },
           { _id: false },
         ),

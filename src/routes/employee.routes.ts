@@ -5,6 +5,7 @@ import * as v from "valibot";
 import { normalizeEmail, normalizePhilippinePhone } from "../lib/auth-utils.js";
 import { addBusinessRole } from "../lib/business-roles.js";
 import { HttpError } from "../lib/http-error.js";
+import { allPermissions } from "../lib/permissions.js";
 import { getOwner } from "../middleware/auth.js";
 import { AuditLog, Business, RegistrationInvite, User } from "../models/index.js";
 import { issueVerificationEmail } from "../services/email-verification.service.js";
@@ -18,10 +19,23 @@ const roleLevel = v.pipe(
   v.minValue(0),
   v.maxValue(98),
 );
+const permissionsSchema = v.pipe(
+  v.array(
+    v.pipe(
+      v.string(),
+      v.check((permission) => allPermissions.includes(permission), "Unknown permission"),
+    ),
+  ),
+  v.check(
+    (permissions) =>
+      permissions.every((permission) => permissions.includes(`${permission.split(":")[0]}:view`)),
+    "View access is required for module actions",
+  ),
+);
 const roleSchema = v.object({
   level: roleLevel,
+  permissions: v.optional(permissionsSchema, []),
   name: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(60)),
-  previousOwnerRoleName: v.optional(v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(60))),
 });
 const accountSchema = v.object({
   name: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(100)),
@@ -87,9 +101,10 @@ employeeRouter.post("/roles", async (request, response) => {
   if (!business) throw new HttpError(404, "Business was not found");
   const previousOwnerRole = Number(business.ownerRole ?? 0);
   const result = addBusinessRole(
-    business.roles.map((role: { level: number; name: string }) => ({
+    business.roles.map((role: { level: number; name: string; permissions?: string[] }) => ({
       level: role.level,
       name: role.name,
+      permissions: role.permissions,
     })),
     previousOwnerRole,
     input,
@@ -100,6 +115,61 @@ employeeRouter.post("/roles", async (request, response) => {
     await User.updateOne({ _id: owner.userId }, { $set: { role: input.level } });
   await business.save();
   response.status(201).json({ roles: business.roles, ownerRole: business.ownerRole });
+});
+
+employeeRouter.patch("/roles/:level", async (request, response) => {
+  const owner = getOwner(request);
+  const level = v.parse(roleLevel, request.params.level);
+  const { name } = v.parse(v.pick(roleSchema, ["name"]), request.body);
+  const business = await Business.findOneAndUpdate(
+    { _id: owner.businessId, "roles.level": level },
+    { $set: { "roles.$.name": name } },
+    { new: true, runValidators: true },
+  );
+  if (!business) throw new HttpError(404, "Role was not found");
+  response.json({ roles: business.roles });
+});
+
+employeeRouter.put("/roles/:level/permissions", async (request, response) => {
+  const owner = getOwner(request);
+  const level = v.parse(roleLevel, request.params.level);
+  const { permissions } = v.parse(v.object({ permissions: permissionsSchema }), request.body);
+  const business = await Business.findById(owner.businessId).select("roles ownerRole");
+  if (!business?.roles.some((role: { level: number }) => role.level === level))
+    throw new HttpError(404, "Role was not found");
+  if (level === Number(business.ownerRole))
+    throw new HttpError(409, "The highest role always has full access");
+  const updated = await Business.findOneAndUpdate(
+    { _id: owner.businessId, ownerRole: { $ne: level }, "roles.level": level },
+    { $set: { "roles.$.permissions": [...new Set(permissions)] } },
+    { returnDocument: "after", runValidators: true },
+  );
+  if (!updated) throw new HttpError(409, "Role changed. Reload and try again");
+  response.json({ roles: updated.roles });
+});
+
+employeeRouter.delete("/roles/:level", async (request, response) => {
+  const owner = getOwner(request);
+  const level = v.parse(roleLevel, request.params.level);
+  const business = await Business.findById(owner.businessId).select("roles ownerRole");
+  if (!business?.roles.some((role: { level: number }) => role.level === level))
+    throw new HttpError(404, "Role was not found");
+  if (level === Number(business.ownerRole))
+    throw new HttpError(409, "The highest business role cannot be deleted");
+  const [user, invite] = await Promise.all([
+    User.exists({ businessId: owner.businessId, role: level }),
+    RegistrationInvite.exists({ businessId: owner.businessId, role: level }),
+  ]);
+  if (user || invite)
+    throw new HttpError(
+      409,
+      "Reassign accounts and reassign or delete registration links using this role before deleting it",
+    );
+  await Business.updateOne(
+    { _id: owner.businessId, ownerRole: { $ne: level } },
+    { $pull: { roles: { level } } },
+  );
+  response.json({ message: "Role deleted" });
 });
 
 employeeRouter.post("/accounts", async (request, response) => {
@@ -177,6 +247,16 @@ employeeRouter.patch("/invites/:id", async (request, response) => {
   );
   if (!invite) throw new HttpError(404, "Registration link was not found");
   response.json(invite);
+});
+
+employeeRouter.delete("/invites/:id", async (request, response) => {
+  const owner = getOwner(request);
+  const invite = await RegistrationInvite.findOneAndDelete({
+    _id: request.params.id,
+    businessId: owner.businessId,
+  });
+  if (!invite) throw new HttpError(404, "Registration link was not found");
+  response.json({ message: "Registration link deleted" });
 });
 
 employeeRouter.post("/invites/:id/regenerate", async (request, response) => {

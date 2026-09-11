@@ -8,6 +8,7 @@ import {
   normalizePhilippinePhone,
 } from "../lib/auth-utils.js";
 import { HttpError } from "../lib/http-error.js";
+import { effectivePermissions } from "../lib/permissions.js";
 import { getOwner, requireOwner } from "../middleware/auth.js";
 import {
   loginLimiter,
@@ -423,6 +424,10 @@ authRouter.get("/me", requireOwner, async (request, response) => {
       isHighestRole:
         Number(ownerUser.role) === 99 ||
         Number(ownerUser.role) === Number(business?.ownerRole ?? 0),
+      permissions: effectivePermissions(
+        business?.roles?.find((role: { level: number }) => role.level === Number(ownerUser.role)),
+        Number(ownerUser.role) === 99 || Number(ownerUser.role) === Number(business?.ownerRole),
+      ),
       roleName:
         Number(ownerUser.role) === 99
           ? "Super Admin"
