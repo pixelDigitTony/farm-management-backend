@@ -28,7 +28,11 @@ export function addBusinessRole(
     throw new HttpError(409, "That role level already exists");
   const ownerRole = Math.max(currentOwnerRole, input.level + 1);
   return result(
-    [...others.map((role) => ({ ...role })), { ...owner, level: ownerRole }, { ...input }],
+    [
+      ...others.map((role) => ({ ...role })),
+      { ...owner, level: ownerRole },
+      { ...input, permissions: [] },
+    ],
     ownerRole,
     [{ from: currentOwnerRole, to: ownerRole }],
   );

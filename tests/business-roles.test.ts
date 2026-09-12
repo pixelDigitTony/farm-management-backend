@@ -13,7 +13,11 @@ describe("role hierarchy", () => {
   it("moves the existing owner above a new role and preserves identities", () => {
     expect(addBusinessRole(roles, 5, { level: 5, name: "Manager" })).toEqual({
       ownerRole: 6,
-      roles: [{ level: 6, name: "Owner" }, { level: 5, name: "Manager" }, roles[1]],
+      roles: [
+        { level: 6, name: "Owner" },
+        { level: 5, name: "Manager", permissions: [] },
+        roles[1],
+      ],
       changes: [{ from: 5, to: 6 }],
     });
     expect(roles[0]?.level).toBe(5);
@@ -48,4 +52,12 @@ describe("role hierarchy", () => {
       expect(() => editBusinessRole(roles, 5, 5, { level, name: "Owner" })).toThrow();
     expect(editBusinessRole(roles, 5, 5, { name: "Business owner" }).ownerRole).toBe(5);
   });
+});
+
+it("creates roles with no permissions even when permissions are supplied", () => {
+  for (const permissions of [undefined, ["inventory:view", "inventory:create"]]) {
+    const result = addBusinessRole(roles, 5, { level: 2, name: "New role", permissions });
+    expect(result.roles.find((role) => role.level === 2)?.permissions).toEqual([]);
+    expect(result.roles.find((role) => role.level === 1)?.permissions).toEqual(["inventory:view"]);
+  }
 });

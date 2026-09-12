@@ -35,7 +35,6 @@ const permissionsSchema = v.pipe(
 );
 const roleSchema = v.object({
   level: v.pipe(roleLevel, v.maxValue(97)),
-  permissions: v.optional(permissionsSchema, []),
   name: v.pipe(v.string(), v.trim(), v.minLength(2), v.maxLength(60)),
 });
 const accountSchema = v.object({
