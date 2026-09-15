@@ -221,6 +221,7 @@ const menuMediaUrl = v.pipe(
   v.trim(),
   v.maxLength(2048),
   v.check((value) => {
+    if (/^\/api\/images\/[a-f0-9]{24}$/.test(value)) return true;
     try {
       const url = new URL(value);
       if (url.protocol !== "https:") return false;

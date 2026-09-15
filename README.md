@@ -294,3 +294,7 @@ npm run build
 8. Use HTTPS and back up MongoDB regularly.
 
 For requests where the frontend and API use different hosts, the API automatically issues the refresh cookie with `SameSite=None`, `Secure`, and `Partitioned`. This allows supported browsers to keep the session in the frontend site's cookie partition even when ordinary third-party cookies are blocked. `AUTH_COOKIE_SAME_SITE` remains the fallback policy for same-host requests.
+
+## Adaptive image uploads
+
+Catalog/menu and landing-page photo controls use the separate image worker. See [deployment and operations](deploy/IMAGES.md), [configuration](deploy/.env.images.example), and [verification](deploy/IMAGE-VERIFICATION.md). API-only hosting with ephemeral storage is insufficient; use the same-server Compose configuration and persistent shared staging.

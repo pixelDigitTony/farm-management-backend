@@ -1,5 +1,6 @@
 import { Router } from "express";
 import mongoose, { type Model } from "mongoose";
+import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
 import { resourceQuery, resourceUpdates } from "../lib/resource-input.js";
 import { getOwner } from "../middleware/auth.js";
@@ -169,6 +170,7 @@ resourceRouter.post("/:resource", async (request, response) => {
   if (request.params.resource === "inventory-items") input.currentStockCached = 0;
   if (request.params.resource === "cash-accounts")
     input.currentBalanceCached = input.openingBalance ?? 0;
+  await assertImageReferences(input, owner.businessId);
   await assertResourceReferences(request.params.resource, input, owner.businessId);
   const item = await getModel(request.params.resource).create({
     ...input,
@@ -188,6 +190,7 @@ resourceRouter.patch("/:resource/:id", async (request, response) => {
     .lean();
   if (!before) throw new HttpError(404, "Record not found");
   const updates = resourceUpdates(request.body, protectedUpdateFields[request.params.resource]);
+  await assertImageReferences(updates, owner.businessId);
   await assertResourceReferences(request.params.resource, updates, owner.businessId);
   const item = await model.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },

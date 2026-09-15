@@ -9,3 +9,6 @@ coverage/
 test-results/
 artifacts/
 .dependencies-before-testing/
+
+deploy/.env.images
+.image-staging/

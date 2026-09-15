@@ -1,0 +1,200 @@
+{
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M3",
+    "node": "v20.19.0"
+  },
+  "note": "Node peak RSS is cumulative and excludes the external metric process. Docker metric is separately limited to 768 MiB; timings include Docker invocation overhead. UI screenshots are not representative product photography.",
+  "results": [
+    {
+      "file": "page-2026-09-10T16-03-04-249Z.png",
+      "width": 1200,
+      "height": 728,
+      "originalBytes": 110473,
+      "webp80Bytes": 22276,
+      "webp80Score": 79.00252381,
+      "webp80EncodingMs": 84.24570799999992,
+      "adaptiveBytes": 12658,
+      "adaptiveScore": 84.88665889,
+      "adaptiveMime": "image/avif",
+      "adaptiveTotalMs": 30914.414541000002,
+      "metricPeakBytes": 135057408,
+      "nodePeakRssKiB": 87808,
+      "candidates": [
+        {
+          "mime": "image/png",
+          "score": 100,
+          "byteLength": 113997
+        },
+        {
+          "mime": "image/avif",
+          "score": 87.77192027,
+          "quality": 60,
+          "byteLength": 15099
+        },
+        {
+          "mime": "image/avif",
+          "score": 86.35405106,
+          "quality": 52,
+          "byteLength": 13570
+        },
+        {
+          "mime": "image/avif",
+          "score": 84.88665889,
+          "quality": 48,
+          "byteLength": 12658
+        },
+        {
+          "mime": "image/webp",
+          "score": 78.13571895,
+          "quality": 81,
+          "byteLength": 22694
+        },
+        {
+          "mime": "image/webp",
+          "score": 83.03604434,
+          "quality": 87,
+          "byteLength": 26112
+        },
+        {
+          "mime": "image/webp",
+          "score": 82.12278306,
+          "quality": 84,
+          "byteLength": 24330
+        },
+        {
+          "mime": "image/png",
+          "score": 100,
+          "byteLength": 110473
+        }
+      ]
+    },
+    {
+      "file": "page-2026-09-10T16-03-34-941Z.png",
+      "width": 390,
+      "height": 844,
+      "originalBytes": 60823,
+      "webp80Bytes": 20832,
+      "webp80Score": 83.12992666,
+      "webp80EncodingMs": 31.149290999994264,
+      "adaptiveBytes": 10744,
+      "adaptiveScore": 83.87800037,
+      "adaptiveMime": "image/avif",
+      "adaptiveTotalMs": 9049.888582999993,
+      "metricPeakBytes": 135057408,
+      "nodePeakRssKiB": 87808,
+      "candidates": [
+        {
+          "mime": "image/png",
+          "score": 100,
+          "byteLength": 56417
+        },
+        {
+          "mime": "image/avif",
+          "score": 87.5216701,
+          "quality": 60,
+          "byteLength": 12989
+        },
+        {
+          "mime": "image/avif",
+          "score": 85.79973797,
+          "quality": 52,
+          "byteLength": 11816
+        },
+        {
+          "mime": "image/avif",
+          "score": 83.87800037,
+          "quality": 48,
+          "byteLength": 10744
+        },
+        {
+          "mime": "image/webp",
+          "score": 83.43770458,
+          "quality": 81,
+          "byteLength": 21220
+        },
+        {
+          "mime": "image/webp",
+          "score": 79.78948481,
+          "quality": 75,
+          "byteLength": 18478
+        },
+        {
+          "mime": "image/webp",
+          "score": 82.20361383,
+          "quality": 78,
+          "byteLength": 19722
+        },
+        {
+          "mime": "image/png",
+          "score": 100,
+          "byteLength": 60823
+        }
+      ]
+    },
+    {
+      "file": "page-2026-09-10T16-06-06-954Z.png",
+      "width": 390,
+      "height": 844,
+      "originalBytes": 62593,
+      "webp80Bytes": 22120,
+      "webp80Score": 82.11018253,
+      "webp80EncodingMs": 36.02079199999571,
+      "adaptiveBytes": 11364,
+      "adaptiveScore": 84.39407621,
+      "adaptiveMime": "image/avif",
+      "adaptiveTotalMs": 10136.620917000007,
+      "metricPeakBytes": 135057408,
+      "nodePeakRssKiB": 87808,
+      "candidates": [
+        {
+          "mime": "image/png",
+          "score": 100,
+          "byteLength": 57786
+        },
+        {
+          "mime": "image/avif",
+          "score": 87.57624376,
+          "quality": 60,
+          "byteLength": 13461
+        },
+        {
+          "mime": "image/avif",
+          "score": 86.36870445,
+          "quality": 52,
+          "byteLength": 12188
+        },
+        {
+          "mime": "image/avif",
+          "score": 84.39407621,
+          "quality": 48,
+          "byteLength": 11364
+        },
+        {
+          "mime": "image/webp",
+          "score": 82.76846511,
+          "quality": 81,
+          "byteLength": 22584
+        },
+        {
+          "mime": "image/webp",
+          "score": 80.65884762,
+          "quality": 75,
+          "byteLength": 19766
+        },
+        {
+          "mime": "image/webp",
+          "score": 80.29953038,
+          "quality": 72,
+          "byteLength": 19292
+        },
+        {
+          "mime": "image/png",
+          "score": 100,
+          "byteLength": 62593
+        }
+      ]
+    }
+  ]
+}

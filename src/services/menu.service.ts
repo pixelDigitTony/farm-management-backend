@@ -1,5 +1,6 @@
 import type { Types } from "mongoose";
 import type { InferOutput } from "valibot";
+import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
 import { inTransaction } from "../lib/transaction.js";
 import { InventoryItem, MenuItem, Recipe } from "../models/index.js";
@@ -22,6 +23,7 @@ async function createMenuWithRecipeInTransaction(
   businessId: Types.ObjectId,
   input: MenuRecipeInput,
 ) {
+  await assertImageReferences(input.menu, businessId);
   await validateIngredients(businessId, input);
   const recipe = await Recipe.create({ ...input.recipe, businessId });
 
@@ -38,6 +40,7 @@ async function updateMenuWithRecipeInTransaction(
   menuId: string,
   input: MenuRecipeInput,
 ) {
+  await assertImageReferences(input.menu, businessId);
   await validateIngredients(businessId, input);
   const menu = await MenuItem.findOne({ _id: menuId, businessId, isActive: true });
   if (!menu) throw new HttpError(404, "Menu item was not found");
