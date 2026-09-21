@@ -20,6 +20,7 @@ import { calendarTodoRouter } from "./routes/calendar-todo.routes.js";
 import { catalogRouter, commercePublicRouter, orderRouter } from "./routes/commerce.routes.js";
 import { dashboardRouter } from "./routes/dashboard.routes.js";
 import { employeeRouter, invitePublicRouter } from "./routes/employee.routes.js";
+import { imageRouter, publicImageRouter } from "./routes/image.routes.js";
 import { landingPagePublicRouter, landingPageRouter } from "./routes/landing-page.routes.js";
 import { operationRouter } from "./routes/operation.routes.js";
 import { reportRouter } from "./routes/report.routes.js";
@@ -61,10 +62,12 @@ app.use(
     credentials: true,
   }),
   publicContentLimiter,
+  publicImageRouter,
   landingPagePublicRouter,
   commercePublicRouter,
 );
 app.use("/api", auditOwnerInteraction);
+app.use("/api/images", imageRouter);
 app.use("/api/admin", requireOwner, requireSuperAdmin, adminRouter);
 app.use("/api/employees", requireOwner, requireApproved, requirePermissions, employeeRouter);
 app.use("/api/dashboard", requireOwner, requireApproved, requirePermissions, dashboardRouter);

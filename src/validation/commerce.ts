@@ -17,7 +17,7 @@ const httpsUrl = v.pipe(
   v.string(),
   v.trim(),
   v.maxLength(1_000),
-  v.regex(/^https:\/\//i, "Use a public HTTPS media link"),
+  v.regex(/^(?:https:\/\/|\/api\/images\/[a-f0-9]{24}$)/i, "Use an HTTPS link or uploaded image"),
 );
 const variantId = v.pipe(
   v.string(),

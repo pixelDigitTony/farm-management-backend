@@ -1,6 +1,7 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import * as v from "valibot";
+import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
 import { Business, LandingPage, LandingPageVariant } from "../models/index.js";
@@ -171,6 +172,7 @@ landingPageRouter.patch("/variants/:id", async (request, response) => {
     ...request.body,
     sections: normalizedSections(request.body),
   });
+  await assertImageReferences(input, owner.businessId);
   const variant = await LandingPageVariant.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
     {

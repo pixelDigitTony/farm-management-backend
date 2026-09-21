@@ -1,4 +1,5 @@
 node_modules/
+.npm-cache/
 dist/
 .env
 coverage/
@@ -9,3 +10,7 @@ coverage/
 test-results/
 artifacts/
 .dependencies-before-testing/
+
+deploy/.env.images
+.image-staging/
+bun.lock

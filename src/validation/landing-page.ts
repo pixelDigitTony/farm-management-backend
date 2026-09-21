@@ -17,7 +17,10 @@ const mediaUrl = v.pipe(
   v.string(),
   v.trim(),
   v.maxLength(1000),
-  v.check((value) => /^https:\/\//i.test(value), "Use a public HTTPS media link"),
+  v.check(
+    (value) => /^(?:https:\/\/|\/api\/images\/[a-f0-9]{24}$)/i.test(value),
+    "Use a public HTTPS media link",
+  ),
 );
 const optionalMediaUrl = v.optional(v.union([v.literal(""), mediaUrl]), "");
 const componentId = v.pipe(

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import mongoose, { type Types } from "mongoose";
 import * as v from "valibot";
+import { assertImageReferences } from "../images/references.js";
 import { catalogPrice } from "../lib/catalog-pricing.js";
 import { decimal, moneyString } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
@@ -115,6 +116,7 @@ export function normalizeProductInput(input: CatalogProductInput) {
 }
 
 export async function createCatalogProduct(businessId: Types.ObjectId, input: CatalogProductInput) {
+  await assertImageReferences(input, businessId);
   return CatalogProduct.create({
     ...normalizeProductInput(input),
     businessId,

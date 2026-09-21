@@ -1,0 +1,18 @@
+FROM node:24-bookworm@sha256:6dac556d980b7f0e5498d08f08cee0ca67798b4ad6c23964a9214920e67758d0 AS metric
+RUN apt-get update && apt-get install -y --no-install-recommends cmake ninja-build git g++ libpng-dev libjpeg-dev libgif-dev libwebp-dev libbrotli-dev liblcms2-dev && rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/libjxl/libjxl.git /opt/libjxl && cd /opt/libjxl && git checkout 794a5dcf0d54f9f0b20d288a12e87afb91d20dfc && git submodule update --init --recursive --depth 1
+RUN cmake -S /opt/libjxl -B /opt/libjxl/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_DEVTOOLS=ON -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF && cmake --build /opt/libjxl/build --target ssimulacra2 -j2
+ENV SSIMULACRA2_BIN=/opt/libjxl/build/tools/ssimulacra2
+
+FROM metric AS app
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json ./
+COPY src ./src
+COPY scripts/run-backend.mjs ./scripts/run-backend.mjs
+RUN npm run build && npm prune --omit=dev
+RUN mkdir -p /var/lib/farm-images && chown node:node /var/lib/farm-images && chmod 700 /var/lib/farm-images
+ENV NODE_ENV=production IMAGE_STAGING_DIR=/var/lib/farm-images
+USER node
+CMD ["node", "dist/server.js"]

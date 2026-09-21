@@ -1,6 +1,7 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import * as v from "valibot";
+import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
 import { getOwner } from "../middleware/auth.js";
 import { publicOrderLimiter } from "../middleware/rate-limit.js";
@@ -118,6 +119,7 @@ catalogRouter.put("/products/:id", async (request, response) => {
   if (reservedOrder)
     throw new HttpError(409, "Process or cancel confirmed orders before editing this product");
   const input = normalizeProductInput(v.parse(catalogProductSchema, request.body));
+  await assertImageReferences(input, owner.businessId);
   const product = await CatalogProduct.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
     { $set: input },

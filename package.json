@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "node scripts/run-backend.mjs dev",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node scripts/run-backend.mjs start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "biome check . && tsc --noEmit",
@@ -33,6 +33,7 @@
     "mongoose": "^9.9.2",
     "morgan": "^1.11.0",
     "resend": "^6.20.0",
+    "sharp": "0.35.4",
     "valibot": "^1.4.2"
   },
   "devDependencies": {

@@ -73,20 +73,35 @@ beforeEach(() => {
   } as any);
   vi.spyOn(Business, "exists").mockResolvedValue({ _id: new Types.ObjectId() });
   vi.spyOn(CustomerOrder, "findOne").mockResolvedValue(null);
-  vi.spyOn(MenuItem, "find").mockResolvedValue([]);
-  vi.spyOn(CatalogProduct, "find").mockResolvedValue([
-    {
-      _id: productId,
-      id: String(productId),
-      name: "Shirt",
-      isActive: true,
-      isOrderable: true,
-      basePrice: 50,
-      variants: [
-        { variantId: "large", name: "Large", price: 100, isAvailable: true, availableQuantity: 5 },
-      ],
-    },
-  ] as any);
+  // Mongoose queries support chaining for public lists and awaiting for checkout.
+  const query = (items: unknown[]): any =>
+    Object.assign(Promise.resolve(items), {
+      select: () => query(items),
+      sort: () => query(items),
+      lean: async () => items,
+    });
+  vi.spyOn(MenuItem, "find").mockReturnValue(query([]));
+  vi.spyOn(CatalogProduct, "find").mockReturnValue(
+    query([
+      {
+        _id: productId,
+        id: String(productId),
+        name: "Shirt",
+        isActive: true,
+        isOrderable: true,
+        basePrice: 50,
+        variants: [
+          {
+            variantId: "large",
+            name: "Large",
+            price: 100,
+            isAvailable: true,
+            availableQuantity: 5,
+          },
+        ],
+      },
+    ]),
+  );
   vi.spyOn(CatalogDiscount, "find").mockReturnValue({
     lean: async () => (promotion.isEnabled ? [promotion] : []),
   } as any);
