@@ -67,6 +67,38 @@ publicImageRouter.get("/images/:id", async (request, response) => {
   await deliver(request, response, image.businessId);
 });
 imageRouter.use(requireOwner, requireApproved);
+// Company-wide library: any permitted image editor can reuse images across features.
+// No job/user restriction: completed images outlive their upload jobs.
+imageRouter.get("/library", async (request, response) => {
+  const owner = await allowed(request, String(request.query.scope ?? ""), false);
+  const cursor = request.query.before;
+  if (cursor !== undefined && (typeof cursor !== "string" || !/^[a-f0-9]{24}$/i.test(cursor)))
+    throw new HttpError(422, "Invalid image cursor");
+  const limit = Number(request.query.limit ?? 24);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 48)
+    throw new HttpError(422, "Choose a page size between 1 and 48");
+  const images = await StoredImage.find({
+    businessId: owner.businessId,
+    ...(cursor ? { _id: { $lt: new mongoose.Types.ObjectId(String(cursor)) } } : {}),
+  })
+    .sort({ _id: -1 })
+    .limit(limit + 1)
+    .select("_id mime width height byteLength createdAt")
+    .lean();
+  const page = images.slice(0, limit);
+  response.set("Cache-Control", "no-store").json({
+    items: page.map((image) => ({
+      id: String(image._id),
+      imageUrl: `/api/images/${image._id}`,
+      mime: image.mime,
+      width: image.width,
+      height: image.height,
+      byteLength: image.byteLength,
+      createdAt: image.createdAt,
+    })),
+    nextCursor: images.length > limit ? String(page[page.length - 1]._id) : null,
+  });
+});
 imageRouter.post("/jobs", async (request, response) => {
   const scope = String(request.query.scope ?? "");
   const owner = await allowed(request, scope, true);

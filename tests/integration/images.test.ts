@@ -61,6 +61,36 @@ const owner = () => ({
   pipelineVersion,
 });
 const output = () => ({ bytes, mime: "image/png", width: 32, height: 16 });
+it("lists the company library across profiles without exposing another tenant or binary data", async () => {
+  const own = await storeOutput(fixture.business._id, output(), "photo");
+  const second = await storeOutput(
+    fixture.business._id,
+    { ...output(), bytes: Buffer.from("second output") },
+    "display",
+  );
+  const foreign = await storeOutput(new mongoose.Types.ObjectId(), output(), "photo");
+  const list = (query: string) =>
+    request(app).get(`/api/images/library?scope=menu&${query}`).auth(token, { type: "bearer" });
+  const first = await list("limit=1").expect(200);
+  expect(first.body.items).toHaveLength(1);
+  expect(first.body.items[0].id).toBe(String(second._id));
+  expect(first.body.items[0].bytes).toBeUndefined();
+  const next = await list(`limit=1&before=${first.body.nextCursor}`).expect(200);
+  expect(next.body.items[0].id).toBe(String(own._id));
+  expect(next.body.nextCursor).toBeNull();
+  expect(
+    [...first.body.items, ...next.body.items].some(
+      (image: any) => image.id === String(foreign._id),
+    ),
+  ).toBe(false);
+  await list("before=invalid").expect(422);
+  await list("limit=10000").expect(422);
+  await request(app).get("/api/images/library?scope=menu").expect(401);
+  await request(app)
+    .get("/api/images/library?scope=unknown")
+    .auth(token, { type: "bearer" })
+    .expect(422);
+});
 it("durably stages an authorized upload, publishes status and attaches only the ready tenant image", async () => {
   const uploaded = await request(app)
     .post("/api/images/jobs?scope=catalog&profile=photo")

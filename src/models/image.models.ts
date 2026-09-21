@@ -17,6 +17,7 @@ const image = new Schema(
   { ...schemaOptions, writeConcern: { w: "majority", j: true } },
 );
 image.index({ businessId: 1, sha256: 1 }, { unique: true });
+image.index({ businessId: 1, _id: -1 });
 export const StoredImage = createModel("StoredImage", image);
 const job = new Schema(
   {
