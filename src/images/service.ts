@@ -1,13 +1,9 @@
-import { encodeInProcess } from "./process.js";
-import "dotenv/config";
-
 import { randomUUID } from "node:crypto";
 import { access, constants, mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import mongoose from "mongoose";
-import { env } from "../config/env.js";
 import { ImageJob, ImageLock, StoredImage } from "../models/image.models.js";
 import { assertImageConfig, imageConfig as c, pipelineVersion } from "./config.js";
+import { encodeInProcess } from "./process.js";
 import {
   acquireLock,
   claimJob,
@@ -23,21 +19,48 @@ import {
 
 let stopping = false;
 let encoding: AbortController | undefined;
-for (const signal of ["SIGINT", "SIGTERM"])
-  process.on(signal, () => {
-    stopping = true;
-    encoding?.abort();
-  });
+let running: Promise<void> | undefined;
+let ready = false;
+let lastError: string | null = null;
+export const imageProcessingStatus = () => ({ ready, lastError });
+
+// Uses the API's database connection. Importing this module never starts processing.
+export async function startImageProcessing() {
+  if (running) return;
+  stopping = false;
+  try {
+    assertImageConfig();
+    await access(c.metric, constants.X_OK);
+    await prepareStaging();
+    for (const model of [ImageJob, ImageLock, StoredImage]) await model.createIndexes();
+    ready = true;
+    lastError = null;
+    running = run()
+      .catch((error) => {
+        ready = false;
+        lastError = "Image processor stopped unexpectedly";
+        console.error(lastError, error);
+      })
+      .finally(() => {
+        running = undefined;
+      });
+  } catch (error) {
+    ready = false;
+    lastError =
+      "Image processing unavailable: check persistent staging and SSIMULACRA2 configuration";
+    console.error(lastError, error);
+  }
+}
+
+export async function stopImageProcessing() {
+  ready = false;
+  stopping = true;
+  encoding?.abort();
+  await running;
+}
+
 async function run() {
-  assertImageConfig();
-  await access(c.metric, constants.X_OK);
-  await prepareStaging();
-  await mongoose.connect(env.MONGODB_URI, {
-    autoIndex: false,
-    dbName: env.NODE_ENV === "test" ? undefined : "MissVBusiness",
-  });
-  for (const model of [ImageJob, ImageLock, StoredImage]) await model.createIndexes();
-  console.log("Image worker started", { pipelineVersion, concurrency: 1 });
+  console.log("Backend image processor started", { pipelineVersion, concurrency: 1 });
   while (!stopping) {
     const token = randomUUID();
     if (!(await acquireLock("image-worker", token))) {
@@ -45,22 +68,28 @@ async function run() {
       continue;
     }
     let lost = false;
+    let renewing: Promise<void> | undefined;
     const renewal = setInterval(
-      async () => {
-        try {
-          const result = await ImageLock.updateOne(
-            { _id: "image-worker", token, until: { $gt: new Date() } },
-            { $set: { until: new Date(Date.now() + c.leaseMs), heartbeat: new Date() } },
-          );
-          if (!result.modifiedCount) throw new Error("Lease lost");
-          await ImageJob.updateMany(
-            { token, state: "processing", leaseUntil: { $gt: new Date() } },
-            { $set: { leaseUntil: new Date(Date.now() + c.leaseMs) } },
-          );
-        } catch {
-          lost = true;
-          encoding?.abort();
-        }
+      () => {
+        if (renewing || stopping) return;
+        renewing = (async () => {
+          try {
+            const result = await ImageLock.updateOne(
+              { _id: "image-worker", token, until: { $gt: new Date() } },
+              { $set: { until: new Date(Date.now() + c.leaseMs), heartbeat: new Date() } },
+            );
+            if (!result.modifiedCount) throw new Error("Lease lost");
+            await ImageJob.updateMany(
+              { token, state: "processing", leaseUntil: { $gt: new Date() } },
+              { $set: { leaseUntil: new Date(Date.now() + c.leaseMs) } },
+            );
+          } catch {
+            lost = true;
+            encoding?.abort();
+          }
+        })().finally(() => {
+          renewing = undefined;
+        });
       },
       Math.floor(c.leaseMs / 3),
     );
@@ -101,6 +130,7 @@ async function run() {
           console.log("Image source cache reused", { id: String(job._id) });
           continue;
         }
+        if (stopping || lost) throw new Error("Image processing stopped");
         encoding = new AbortController();
         const metadata = await encodeInProcess(
           sourcePath(String(job._id)),
@@ -137,20 +167,19 @@ async function run() {
         await failJob(
           job,
           token,
-          "Image processing failed. Use a still image within limits; ask the administrator to check the worker and SSIMULACRA2, then retry.",
+          "Image processing failed. Use a still image within limits; ask the administrator to check backend image processing, then retry.",
         );
       } finally {
         encoding = undefined;
         await rm(directory, { recursive: true, force: true });
       }
+    } catch (error) {
+      console.error("Image processor iteration failed", error);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     } finally {
       clearInterval(renewal);
+      await renewing;
       await releaseLock("image-worker", token);
     }
   }
-  await mongoose.disconnect();
 }
-run().catch((error) => {
-  console.error("Image worker startup failed", error);
-  process.exit(1);
-});

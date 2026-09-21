@@ -1,6 +1,7 @@
 import { app } from "./app.js";
 import { connectDatabase, disconnectDatabase } from "./config/database.js";
 import { env, resendEmailFallbackActive } from "./config/env.js";
+import { startImageProcessing, stopImageProcessing } from "./images/service.js";
 
 async function start() {
   if (resendEmailFallbackActive) {
@@ -9,14 +10,23 @@ async function start() {
     );
   }
   await connectDatabase();
+  await startImageProcessing();
   const server = app.listen(env.PORT, () =>
     console.log(`Miss V Business API running on http://localhost:${env.PORT}`),
   );
-  const shutdown = () =>
-    server.close(async () => {
-      await disconnectDatabase();
-      process.exit(0);
-    });
+  let stopping = false;
+  const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
+    const deadline = setTimeout(() => process.exit(1), 35_000);
+    deadline.unref();
+    const processing = stopImageProcessing();
+    const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+    await Promise.all([processing, closed]);
+    await disconnectDatabase();
+    clearTimeout(deadline);
+    process.exit(0);
+  };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 }

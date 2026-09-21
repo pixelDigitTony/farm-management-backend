@@ -4,7 +4,7 @@ import { join } from "node:path";
 import mongoose from "mongoose";
 import sharp from "sharp";
 import request from "supertest";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { app } from "../../src/app.js";
 import { imageConfig as c, pipelineVersion } from "../../src/images/config.js";
 import {
@@ -22,6 +22,11 @@ import { ImageJob, StoredImage } from "../../src/models/image.models.js";
 import { CatalogProduct, LandingPage } from "../../src/models/index.js";
 import { seedBrowserFixtures, testCredentials } from "../support/seed.js";
 import { startTestDatabase } from "./database.js";
+
+// These queue tests control job claims manually; executable API tests exercise the real service.
+vi.mock("../../src/images/service.js", () => ({
+  imageProcessingStatus: () => ({ ready: true, lastError: null }),
+}));
 
 let stop: (() => Promise<void>) | undefined;
 let fixture: Awaited<ReturnType<typeof seedBrowserFixtures>>;

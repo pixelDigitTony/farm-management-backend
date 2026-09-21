@@ -1,4 +1,5 @@
 node_modules/
+.npm-cache/
 dist/
 .env
 coverage/
@@ -12,3 +13,4 @@ artifacts/
 
 deploy/.env.images
 .image-staging/
+bun.lock

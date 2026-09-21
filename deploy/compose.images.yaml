@@ -1,4 +1,4 @@
-# Run both services on ONE host. Never use ephemeral or independent staging volumes.
+# One backend service runs HTTP and image processing. Keep staging persistent.
 services:
   api:
     build:
@@ -12,17 +12,7 @@ services:
     command: ["node", "--max-old-space-size=384", "dist/server.js"]
     ports: ["127.0.0.1:4000:4000"]
     volumes: ["image-staging:/var/lib/farm-images"]
-    mem_limit: 768m
-    cpus: 1
-    stop_grace_period: 45s
-  worker:
-    image: farm-images:local
-    init: true
-    restart: unless-stopped
-    env_file: .env.images
-    command: ["node", "--max-old-space-size=384", "dist/images/worker.js"]
-    volumes: ["image-staging:/var/lib/farm-images"]
-    mem_limit: 1536m
+    mem_limit: 2304m
     cpus: 2
     pids_limit: 128
     stop_grace_period: 45s

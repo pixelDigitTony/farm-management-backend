@@ -1,4 +1,4 @@
-import { fork } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { imageConfig as c } from "./config.js";
 export function encodeInProcess(
   source: string,
@@ -18,11 +18,26 @@ export function encodeInProcess(
         stdio: ["ignore", "inherit", "inherit", "ipc"],
       });
       let result: any;
+      let terminated = false;
       const kill = () => {
+        terminated = true;
         if (child.pid) {
+          if (process.platform === "win32") {
+            const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+              windowsHide: true,
+              stdio: "ignore",
+            });
+            killer.on("error", () => child.kill("SIGKILL"));
+            killer.on("exit", (code) => {
+              if (code !== 0) child.kill("SIGKILL");
+            });
+            return;
+          }
           try {
             process.kill(-child.pid, "SIGKILL");
-          } catch {}
+          } catch {
+            child.kill("SIGKILL");
+          }
         }
       };
       const timeout = setTimeout(kill, c.timeoutMs);
@@ -40,7 +55,7 @@ export function encodeInProcess(
       });
       child.once("exit", (code) => {
         clean();
-        if (code === 0 && result?.ok && !signal.aborted) resolve(result);
+        if (code === 0 && result?.ok && !signal.aborted && !terminated) resolve(result);
         else
           reject(new Error("Image validation, quality assessment or processing time limit failed"));
       });

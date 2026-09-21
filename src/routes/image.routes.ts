@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { type ImageProfile, imageConfig } from "../images/config.js";
 import { stageUpload } from "../images/queue.js";
 import { imageIds } from "../images/references.js";
+import { imageProcessingStatus } from "../images/service.js";
 import { HttpError } from "../lib/http-error.js";
 import { effectivePermissions } from "../lib/permissions.js";
 import { getOwner, requireApproved, requireOwner } from "../middleware/auth.js";
@@ -69,6 +70,11 @@ imageRouter.use(requireOwner, requireApproved);
 imageRouter.post("/jobs", async (request, response) => {
   const scope = String(request.query.scope ?? "");
   const owner = await allowed(request, scope, true);
+  if (!imageProcessingStatus().ready)
+    throw new HttpError(
+      503,
+      "Image processing is unavailable. Ask the administrator to check backend image configuration.",
+    );
   const profile = String(request.query.profile ?? "photo");
   if (!Object.hasOwn(imageConfig.dimensions, profile))
     throw new HttpError(422, "Invalid image profile");
@@ -123,8 +129,25 @@ imageRouter.get("/health", async (request, response) => {
   if (owner.role !== 99 && owner.role !== Number(business?.ownerRole))
     throw new HttpError(403, "Owner access required");
   const heartbeat = await ImageLock.findById("image-worker").lean();
-  const healthy = Boolean(heartbeat && new Date(heartbeat.until).getTime() > Date.now());
-  response.status(healthy ? 200 : 503).json({ healthy, heartbeat: heartbeat?.heartbeat ?? null });
+  const status = imageProcessingStatus();
+  const healthy =
+    status.ready && Boolean(heartbeat && new Date(heartbeat.until).getTime() > Date.now());
+  const [queued, processing, failures] = await Promise.all([
+    ImageJob.countDocuments({ state: "queued" }),
+    ImageJob.countDocuments({ state: "processing" }),
+    ImageJob.find({ businessId: owner.businessId, state: "failed" })
+      .sort({ updatedAt: -1 })
+      .limit(5)
+      .select("error updatedAt")
+      .lean(),
+  ]);
+  response.status(healthy ? 200 : 503).json({
+    healthy,
+    ...status,
+    heartbeat: heartbeat?.heartbeat ?? null,
+    queue: { queued, processing },
+    recentFailures: failures,
+  });
 });
 imageRouter.get("/:id", async (request, response) => {
   const owner = getOwner(request);

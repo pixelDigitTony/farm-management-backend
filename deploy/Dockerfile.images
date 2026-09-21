@@ -10,6 +10,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts/run-backend.mjs ./scripts/run-backend.mjs
 RUN npm run build && npm prune --omit=dev
 RUN mkdir -p /var/lib/farm-images && chown node:node /var/lib/farm-images && chmod 700 /var/lib/farm-images
 ENV NODE_ENV=production IMAGE_STAGING_DIR=/var/lib/farm-images

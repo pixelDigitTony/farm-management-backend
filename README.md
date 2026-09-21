@@ -264,12 +264,12 @@ src/
 
 | Command | Purpose |
 | --- | --- |
-| `npm run dev` | Run the TypeScript API with file watching |
+| `npm run dev` | Windows: build/start Docker on port 4001. Linux: TypeScript API with file watching |
 | `npm run check` | Run Biome and TypeScript validation |
 | `npm run typecheck` | Check types without emitting files |
 | `npm test` | Run all Vitest tests |
 | `npm run build` | Compile the API to `dist/` |
-| `npm start` | Run `dist/server.js` |
+| `npm start` | Windows: build/start Docker on port 4001. Linux: run `dist/server.js` |
 | `npm run format` | Apply Biome formatting and safe fixes |
 
 ## Tests
@@ -297,4 +297,4 @@ For requests where the frontend and API use different hosts, the API automatical
 
 ## Adaptive image uploads
 
-Catalog/menu and landing-page photo controls use the separate image worker. See [deployment and operations](deploy/IMAGES.md), [configuration](deploy/.env.images.example), and [verification](deploy/IMAGE-VERIFICATION.md). API-only hosting with ephemeral storage is insufficient; use the same-server Compose configuration and persistent shared staging.
+Catalog/menu and landing-page photo controls use image processing started automatically by the backend. See [deployment and operations](deploy/IMAGES.md), [configuration](deploy/.env.images.example), and [verification](deploy/IMAGE-VERIFICATION.md). Run `npm start` for both the API and image processing. Use the single-service Compose configuration with persistent staging; ephemeral storage cannot preserve queued uploads across restarts.

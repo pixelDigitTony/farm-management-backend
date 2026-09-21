@@ -3,7 +3,10 @@ import { env } from "./env.js";
 
 export async function connectDatabase() {
   mongoose.set("strictQuery", true);
-  await mongoose.connect(env.MONGODB_URI, { dbName: "MissVBusiness", autoIndex: false });
+  await mongoose.connect(env.MONGODB_URI, {
+    dbName: env.NODE_ENV === "test" ? undefined : "MissVBusiness",
+    autoIndex: false,
+  });
   await migrateNumericRoles();
   await Promise.all(Object.values(mongoose.models).map((model) => model.createIndexes()));
 }

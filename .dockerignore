@@ -4,5 +4,7 @@
 !tsconfig.json
 !src/
 !src/**
+!scripts/
+!scripts/run-backend.mjs
 !deploy/
 !deploy/Dockerfile.images

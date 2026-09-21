@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "node scripts/run-backend.mjs dev",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node scripts/run-backend.mjs start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "biome check . && tsc --noEmit",
@@ -16,9 +16,7 @@
     "test:architecture": "node scripts/check-architecture.mjs",
     "test:load": "node scripts/run-load.mjs",
     "typecheck:tests": "tsc -p tsconfig.test.json",
-    "test:serve": "NODE_ENV=test EMAIL_PROVIDER=console JWT_SECRET=isolated-test-secret-not-for-production tsx tests/support/server.ts",
-    "dev:worker": "tsx src/images/worker.ts",
-    "start:worker": "node --max-old-space-size=384 dist/images/worker.js"
+    "test:serve": "NODE_ENV=test EMAIL_PROVIDER=console JWT_SECRET=isolated-test-secret-not-for-production tsx tests/support/server.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
