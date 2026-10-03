@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { access, constants, mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { HttpError } from "../lib/http-error.js";
 import { ImageJob, ImageLock, StoredImage } from "../models/image.models.js";
 import { assertImageConfig, imageConfig as c, pipelineVersion } from "./config.js";
+import { trashedImageMessage } from "./library.js";
 import { encodeInProcess } from "./process.js";
 import {
   acquireLock,
@@ -167,7 +169,10 @@ async function run() {
         await failJob(
           job,
           token,
-          "Image processing failed. Use a still image within limits; ask the administrator to check backend image processing, then retry.",
+          error instanceof HttpError && error.status === 409
+            ? trashedImageMessage
+            : "Image processing failed. Use a still image within limits; ask the administrator to check backend image processing, then retry.",
+          error instanceof HttpError && error.status === 409,
         );
       } finally {
         encoding = undefined;

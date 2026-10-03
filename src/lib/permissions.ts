@@ -13,6 +13,7 @@ export const permissionModules = [
   { id: "karenderiya", name: "Sales & cooking", actions: ["view", "create", "edit", "delete"] },
   { id: "reports", name: "Reports", actions: ["view"] },
   { id: "activity-log", name: "Activity log", actions: ["view"] },
+  { id: "media-library", name: "Media library", actions: ["view", "create", "edit", "delete"] },
   { id: "settings", name: "Settings & contacts", actions: ["view", "create", "edit", "delete"] },
 ] as const;
 export type PermissionAction = "view" | "create" | "edit" | "delete";
@@ -21,7 +22,10 @@ export const allPermissions = permissionModules.flatMap((module) =>
 );
 // Undefined means a role created before configurable permissions existed.
 export const legacyPermissions = allPermissions.filter(
-  (permission) => !["landing-page", "catalog", "orders"].includes(permission.split(":")[0] ?? ""),
+  (permission) =>
+    !["landing-page", "catalog", "orders", "media-library"].includes(
+      permission.split(":")[0] ?? "",
+    ),
 );
 export function effectivePermissions(
   role: { permissions?: string[] } | undefined,

@@ -1,6 +1,7 @@
 import { type Request, type Response, Router } from "express";
 import mongoose from "mongoose";
 import { type ImageProfile, imageConfig } from "../images/config.js";
+import { trashedImageMessage } from "../images/library.js";
 import { stageUpload } from "../images/queue.js";
 import { imageIds } from "../images/references.js";
 import { imageProcessingStatus } from "../images/service.js";
@@ -12,9 +13,14 @@ import { Business, LandingPage } from "../models/index.js";
 import { getPublishedCatalogItems } from "../services/commerce.service.js";
 export const imageRouter = Router();
 export const publicImageRouter = Router();
-async function allowed(request: Request, scope: string, write: boolean) {
+async function allowed(
+  request: Request,
+  scope: string,
+  write: boolean,
+  action?: "edit" | "delete",
+) {
   const owner = getOwner(request);
-  if (!["catalog", "menu", "landing-page"].includes(scope))
+  if (!["catalog", "menu", "landing-page", "media-library"].includes(scope))
     throw new HttpError(422, "Choose an image usage");
   const business = await Business.findById(owner.businessId).select("roles ownerRole").lean();
   const highest = owner.role === 99 || owner.role === Number(business?.ownerRole);
@@ -24,7 +30,11 @@ async function allowed(request: Request, scope: string, write: boolean) {
   );
   if (
     !permissions.includes(`${scope}:view`) ||
-    (write && !["create", "edit"].some((action) => permissions.includes(`${scope}:${action}`)))
+    (write &&
+      (scope === "media-library"
+        ? !permissions.includes(`${scope}:create`)
+        : !["create", "edit"].some((item) => permissions.includes(`${scope}:${item}`)))) ||
+    (action && !permissions.includes(`${scope}:${action}`))
   )
     throw new HttpError(403, "Your role cannot upload or view images for this feature");
   return owner;
@@ -70,7 +80,12 @@ imageRouter.use(requireOwner, requireApproved);
 // Company-wide library: any permitted image editor can reuse images across features.
 // No job/user restriction: completed images outlive their upload jobs.
 imageRouter.get("/library", async (request, response) => {
-  const owner = await allowed(request, String(request.query.scope ?? ""), false);
+  const scope = String(request.query.scope ?? "");
+  const owner = await allowed(request, scope, false);
+  const status = request.query.status ?? "active";
+  if (status !== "active" && status !== "trash") throw new HttpError(422, "Invalid library status");
+  if (status === "trash" && scope !== "media-library")
+    throw new HttpError(403, "Open Media library to view trash");
   const cursor = request.query.before;
   if (cursor !== undefined && (typeof cursor !== "string" || !/^[a-f0-9]{24}$/i.test(cursor)))
     throw new HttpError(422, "Invalid image cursor");
@@ -79,11 +94,12 @@ imageRouter.get("/library", async (request, response) => {
     throw new HttpError(422, "Choose a page size between 1 and 48");
   const images = await StoredImage.find({
     businessId: owner.businessId,
+    trashedAt: status === "trash" ? { $ne: null } : null,
     ...(cursor ? { _id: { $lt: new mongoose.Types.ObjectId(String(cursor)) } } : {}),
   })
     .sort({ _id: -1 })
     .limit(limit + 1)
-    .select("_id mime width height byteLength createdAt")
+    .select("_id mime width height byteLength createdAt trashedAt")
     .lean();
   const page = images.slice(0, limit);
   response.set("Cache-Control", "no-store").json({
@@ -95,13 +111,50 @@ imageRouter.get("/library", async (request, response) => {
       height: image.height,
       byteLength: image.byteLength,
       createdAt: image.createdAt,
+      trashedAt: image.trashedAt,
     })),
     nextCursor: images.length > limit ? String(page[page.length - 1]._id) : null,
   });
 });
+for (const operation of ["trash", "restore"] as const) {
+  imageRouter.post(`/:id/${operation}`, async (request, response) => {
+    const owner = await allowed(request, "media-library", false, "delete");
+    if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(404, "Image not found");
+    const filter = { _id: request.params.id, businessId: owner.businessId };
+    if (!(await StoredImage.exists(filter))) throw new HttpError(404, "Image not found");
+    if (operation === "trash") {
+      await StoredImage.updateOne(
+        { ...filter, trashedAt: null },
+        {
+          $set: { trashedAt: new Date(), trashedBy: owner.userId },
+        },
+      );
+    } else {
+      await StoredImage.updateOne(filter, { $unset: { trashedAt: 1, trashedBy: 1 } });
+    }
+    response.status(204).end();
+  });
+}
 imageRouter.post("/jobs", async (request, response) => {
   const scope = String(request.query.scope ?? "");
   const owner = await allowed(request, scope, true);
+  if (request.query.sourceImageId !== undefined) {
+    if (
+      scope !== "media-library" ||
+      typeof request.query.sourceImageId !== "string" ||
+      !mongoose.isValidObjectId(request.query.sourceImageId)
+    )
+      throw new HttpError(422, "Invalid source image");
+    await allowed(request, scope, true, "edit");
+    if (
+      !(await StoredImage.exists({
+        _id: request.query.sourceImageId,
+        businessId: owner.businessId,
+        trashedAt: null,
+      }))
+    )
+      throw new HttpError(404, "Source image not found in the library");
+  }
   if (!imageProcessingStatus().ready)
     throw new HttpError(
       503,
@@ -131,12 +184,20 @@ imageRouter.get("/jobs/:id", async (request, response) => {
   }).lean();
   if (!job) throw new HttpError(404, "Image job not found");
   await allowed(request, job.scope, false);
+  // Trash affects discovery only. Previously saved references still resolve through delivery.
+  const trashed =
+    job.state === "ready" &&
+    (await StoredImage.exists({
+      _id: job.imageId,
+      businessId: owner.businessId,
+      trashedAt: { $ne: null },
+    }));
   response.set("Cache-Control", "no-store").json({
     jobId: String(job._id),
-    state: job.state,
-    error: job.state === "failed" ? job.error : undefined,
-    imageId: job.state === "ready" ? String(job.imageId) : undefined,
-    imageUrl: job.state === "ready" ? `/api/images/${job.imageId}` : undefined,
+    state: trashed ? "failed" : job.state,
+    error: trashed ? trashedImageMessage : job.state === "failed" ? job.error : undefined,
+    imageId: job.state === "ready" && !trashed ? String(job.imageId) : undefined,
+    imageUrl: job.state === "ready" && !trashed ? `/api/images/${job.imageId}` : undefined,
   });
 });
 imageRouter.delete("/jobs/:id", async (request, response) => {
@@ -185,7 +246,7 @@ imageRouter.get("/:id", async (request, response) => {
   const owner = getOwner(request);
   // Private image access remains tenant-scoped and requires a relevant view permission.
   let permitted = false;
-  for (const scope of ["catalog", "menu", "landing-page"]) {
+  for (const scope of ["catalog", "menu", "landing-page", "media-library"]) {
     try {
       await allowed(request, scope, false);
       permitted = true;

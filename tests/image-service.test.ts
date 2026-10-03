@@ -122,7 +122,7 @@ it("aborts an active encode before releasing its lease and never publishes its o
   expect(mocks.encode).toHaveBeenCalledOnce();
   await stopImageProcessing();
   expect(signal?.aborted).toBe(true);
-  expect(mocks.fail).toHaveBeenCalledWith(job, expect.any(String), expect.any(String));
+  expect(mocks.fail).toHaveBeenCalledWith(job, expect.any(String), expect.any(String), false);
   expect(mocks.release).toHaveBeenCalledOnce();
   expect(mocks.finish).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);

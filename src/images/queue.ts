@@ -11,6 +11,7 @@ import {
   type ImageProfile,
   pipelineVersion,
 } from "./config.js";
+import { assertActiveImage } from "./library.js";
 export async function prepareStaging() {
   await mkdir(c.staging, { recursive: true, mode: 0o700 });
   const directory = await lstat(c.staging);
@@ -111,6 +112,7 @@ export async function stageUpload(
       state: "ready",
     }).lean();
     const image = cached && (await StoredImage.findOne({ _id: cached.imageId, businessId }).lean());
+    assertActiveImage(image);
     const job = await ImageJob.create({
       _id: id,
       businessId,
@@ -155,13 +157,15 @@ export function ownedJob(id: unknown, token: string) {
   return { _id: id, token, state: "processing", leaseUntil: { $gt: new Date() } };
 }
 export async function finishJob(id: unknown, token: string, imageId: unknown) {
+  // Recheck at completion: a photo can be trashed after cache lookup or output insertion.
+  assertActiveImage(await StoredImage.findById(imageId).select("trashedAt").lean());
   return ImageJob.updateOne(ownedJob(id, token), {
     $set: { state: "ready", imageId },
     $unset: { error: 1 },
   });
 }
-export async function failJob(job: any, token: string, error: string) {
-  const terminal = job.attempts >= c.attempts;
+export async function failJob(job: any, token: string, error: string, permanent = false) {
+  const terminal = permanent || job.attempts >= c.attempts;
   return ImageJob.updateOne(ownedJob(job._id, token), {
     $set: {
       state: terminal ? "failed" : "queued",
@@ -189,6 +193,7 @@ export async function storeOutput(
     if ((error as { code?: number }).code !== 11000) throw error;
     const image = await StoredImage.findOne({ businessId, sha256 });
     if (!image) throw error;
+    assertActiveImage(image);
     return image;
   }
 }

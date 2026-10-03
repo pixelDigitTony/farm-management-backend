@@ -13,6 +13,8 @@ const image = new Schema(
     sha256: String,
     profile: String,
     pipelineVersion: String,
+    trashedAt: Date,
+    trashedBy: objectId("User"),
   },
   { ...schemaOptions, writeConcern: { w: "majority", j: true } },
 );

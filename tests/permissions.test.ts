@@ -9,6 +9,8 @@ describe("module permission policy", () => {
   it("distinguishes unconfigured legacy roles from explicit no-access roles", () => {
     expect(effectivePermissions({}, false)).toContain("inventory:delete");
     expect(effectivePermissions({}, false)).not.toContain("catalog:view");
+    expect(effectivePermissions({}, false)).not.toContain("media-library:view");
+    expect(effectivePermissions({ permissions: [] }, true)).toContain("media-library:delete");
     expect(effectivePermissions({ permissions: [] }, false)).toEqual([]);
     expect(effectivePermissions(undefined, false)).toEqual([]);
     expect(effectivePermissions({ permissions: [] }, true)).toContain("catalog:delete");
