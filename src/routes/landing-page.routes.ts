@@ -185,6 +185,29 @@ landingPageRouter.patch("/variants/:id", async (request, response) => {
   response.json(serializedVariant(variant.toObject()));
 });
 
+landingPageRouter.patch("/variants/:id/reset", async (request, response) => {
+  const owner = getOwner(request);
+  if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(400, "Invalid variant id");
+  const page = await getPage(owner.businessId);
+  const variant = await LandingPageVariant.findOne({
+    _id: request.params.id,
+    landingPageId: page._id,
+    businessId: owner.businessId,
+  });
+  if (!variant) throw new HttpError(404, "Landing-page variant was not found");
+  const [business, catalogItems] = await Promise.all([
+    Business.findById(owner.businessId).lean(),
+    getBuilderCatalogItems(owner.businessId),
+  ]);
+  variant.theme = defaultTheme;
+  variant.commerce = defaultLandingPageCommerceSettings;
+  variant.sections = defaultLandingSections(business, catalogItems);
+  variant.set("components", undefined);
+  variant.updatedByUserId = owner.userId;
+  await variant.save();
+  response.json(serializedVariant(variant.toObject()));
+});
+
 landingPageRouter.delete("/variants/:id", async (request, response) => {
   const owner = getOwner(request);
   if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(400, "Invalid variant id");
