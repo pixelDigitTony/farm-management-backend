@@ -143,12 +143,42 @@ export function hasEnabledCatalog(snapshot: any, type: "CATALOG" | "MENU" = "CAT
 }
 
 export async function getPublishedCatalogItems(businessId: Types.ObjectId, snapshot: any) {
-  if (hasEnabledCatalog(snapshot)) return getBuilderCatalogItems(businessId);
+  if (hasEnabledCatalog(snapshot))
+    return filterPublishedCatalogItems(snapshot, await getBuilderCatalogItems(businessId));
   if (hasEnabledCatalog(snapshot, "MENU")) {
     const menus = await getLandingMenuItems(businessId);
-    return menus.map(publicMenuItem);
+    return filterPublishedCatalogItems(snapshot, menus.map(publicMenuItem));
   }
   return [];
+}
+
+// V2 orders are limited to items exposed by enabled published catalog/menu blocks.
+// Legacy pages retain their existing whole-collection behavior.
+export function filterPublishedCatalogItems<T extends { sourceType: string; sourceId: string }>(
+  snapshot: any,
+  items: T[],
+): T[] {
+  if (snapshot.schemaVersion !== 2) return items;
+  const blocks = publishedSections(snapshot)
+    .filter((s: any) => s.enabled !== false)
+    .flatMap((s: any) =>
+      Array.isArray(s.components)
+        ? s.components.filter(
+            (c: any) => c.enabled !== false && (c.type === "CATALOG" || c.type === "MENU"),
+          )
+        : [],
+    );
+  return items.filter((item) =>
+    blocks.some((block: any) =>
+      block.type === "CATALOG"
+        ? !block.content.catalogItemRefs?.length ||
+          block.content.catalogItemRefs.some(
+            (r: any) => r.sourceType === item.sourceType && r.sourceId === item.sourceId,
+          )
+        : item.sourceType === "MENU_ITEM" &&
+          (!block.content.menuItemIds?.length || block.content.menuItemIds.includes(item.sourceId)),
+    ),
+  );
 }
 
 async function publishedOrderingContext(slug: string) {

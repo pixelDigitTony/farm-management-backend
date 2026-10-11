@@ -13,6 +13,12 @@ import {
 } from "../services/commerce.service.js";
 import { createSection, defaultLandingSections } from "../services/landing-page-template.js";
 import {
+  createLandingPreset,
+  landingScenes,
+  landingTemplates,
+} from "../services/landing-presets.js";
+import { assertLandingCatalogReferences } from "../services/landing-references.js";
+import {
   defaultLandingPageCommerceSettings,
   type LandingPageVariantInput,
   landingPageCommerceSettingsSchema,
@@ -44,6 +50,7 @@ function serializedVariant(source: Record<string, unknown>) {
   const { components: _legacyComponents, ...rest } = source;
   return {
     ...rest,
+    schemaVersion: source.schemaVersion ?? 1,
     commerce: source.commerce ?? defaultLandingPageCommerceSettings,
     sections,
     // Temporary compatibility for a frontend deployed before section support.
@@ -82,8 +89,25 @@ async function builderPayload(businessId: mongoose.Types.ObjectId) {
     getBuilderCatalogItems(businessId),
   ]);
   const normalizedVariants = variants.map((variant) => serializedVariant(variant));
-  return { page, variants: normalizedVariants, menuItems, catalogItems };
+  return {
+    page,
+    variants: normalizedVariants,
+    menuItems,
+    catalogItems,
+    capabilities: {
+      schemaVersions: [1, 2],
+      templates: process.env.LANDING_V2_TEMPLATES !== "false",
+    },
+  };
 }
+
+landingPageRouter.get("/templates", (_request, response) => {
+  response.json({
+    templates: process.env.LANDING_V2_TEMPLATES === "false" ? [] : landingTemplates,
+    scenes: landingScenes,
+    schemaVersion: 2,
+  });
+});
 
 landingPageRouter.get("/", async (request, response) => {
   response.json(await builderPayload(getOwner(request).businessId));
@@ -147,18 +171,42 @@ landingPageRouter.post("/variants", async (request, response) => {
     : null;
   if (input.duplicateFromId && !duplicate)
     throw new HttpError(404, "The source variant was not found");
+  if (input.templateId && process.env.LANDING_V2_TEMPLATES === "false")
+    throw new HttpError(409, "New templates are temporarily unavailable");
+  const preset = input.templateId
+    ? createLandingPreset(
+        input.templateId,
+        input.templateRevision,
+        input.goal,
+        await Business.findById(owner.businessId).lean(),
+        await getBuilderCatalogItems(owner.businessId),
+      )
+    : null;
+  if (preset) {
+    await assertImageReferences(preset, owner.businessId);
+    await assertLandingCatalogReferences(preset, owner.businessId);
+  }
+  if (duplicate) {
+    await assertImageReferences(duplicate, owner.businessId);
+    await assertLandingCatalogReferences(duplicate, owner.businessId);
+  }
   const variant = await LandingPageVariant.create({
     businessId: owner.businessId,
     landingPageId: page._id,
     name: input.name,
-    theme: duplicate?.theme ?? defaultTheme,
-    commerce: duplicate?.commerce ?? defaultLandingPageCommerceSettings,
-    sections: duplicate
-      ? normalizedSections(duplicate)
-      : defaultLandingSections(
-          await Business.findById(owner.businessId).lean(),
-          await getBuilderCatalogItems(owner.businessId),
-        ),
+    schemaVersion: preset?.schemaVersion ?? duplicate?.schemaVersion ?? 1,
+    template: preset?.template ?? duplicate?.template,
+    goal: preset?.goal ?? duplicate?.goal,
+    theme: preset?.theme ?? duplicate?.theme ?? defaultTheme,
+    commerce: preset?.commerce ?? duplicate?.commerce ?? defaultLandingPageCommerceSettings,
+    sections:
+      preset?.sections ??
+      (duplicate
+        ? normalizedSections(duplicate)
+        : defaultLandingSections(
+            await Business.findById(owner.businessId).lean(),
+            await getBuilderCatalogItems(owner.businessId),
+          )),
     createdByUserId: owner.userId,
     updatedByUserId: owner.userId,
   });
@@ -168,13 +216,37 @@ landingPageRouter.post("/variants", async (request, response) => {
 landingPageRouter.patch("/variants/:id", async (request, response) => {
   const owner = getOwner(request);
   if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(400, "Invalid variant id");
+  const current = await LandingPageVariant.findOne({
+    _id: request.params.id,
+    businessId: owner.businessId,
+  }).lean();
+  if (!current) throw new HttpError(404, "Landing-page variant was not found");
+  if (current.schemaVersion === 2 && request.body.schemaVersion !== 2)
+    throw new HttpError(
+      409,
+      "Upgrade your editor to edit this design",
+      undefined,
+      "UPGRADE_REQUIRED",
+    );
+  if (current.schemaVersion !== 2 && request.body.schemaVersion === 2)
+    throw new HttpError(
+      409,
+      "Upgrade as a new variant to preserve the original",
+      undefined,
+      "UPGRADE_REQUIRED",
+    );
   const input = v.parse(landingPageVariantUpdateSchema, {
     ...request.body,
     sections: normalizedSections(request.body),
   });
   await assertImageReferences(input, owner.businessId);
+  await assertLandingCatalogReferences(input, owner.businessId);
   const variant = await LandingPageVariant.findOneAndUpdate(
-    { _id: request.params.id, businessId: owner.businessId },
+    {
+      _id: request.params.id,
+      businessId: owner.businessId,
+      schemaVersion: current.schemaVersion === 2 ? 2 : { $ne: 2 },
+    },
     {
       $set: { ...input, updatedByUserId: owner.userId },
       $unset: { components: 1 },
@@ -199,9 +271,25 @@ landingPageRouter.patch("/variants/:id/reset", async (request, response) => {
     Business.findById(owner.businessId).lean(),
     getBuilderCatalogItems(owner.businessId),
   ]);
-  variant.theme = defaultTheme;
-  variant.commerce = defaultLandingPageCommerceSettings;
-  variant.sections = defaultLandingSections(business, catalogItems);
+  if (variant.schemaVersion === 2 && variant.template) {
+    const preset = createLandingPreset(
+      variant.template.id,
+      variant.template.revision,
+      variant.goal,
+      business,
+      catalogItems,
+    );
+    await assertImageReferences(preset, owner.businessId);
+    await assertLandingCatalogReferences(preset, owner.businessId);
+    variant.theme = preset.theme;
+    variant.commerce = preset.commerce;
+    variant.sections = preset.sections;
+    variant.goal = preset.goal;
+  } else {
+    variant.theme = defaultTheme;
+    variant.commerce = defaultLandingPageCommerceSettings;
+    variant.sections = defaultLandingSections(business, catalogItems);
+  }
   variant.set("components", undefined);
   variant.updatedByUserId = owner.userId;
   await variant.save();
@@ -243,11 +331,16 @@ landingPageRouter.post("/variants/:id/publish", async (request, response) => {
     )
   )
     throw new HttpError(422, "Show at least one component before publishing");
+  await assertImageReferences(input, owner.businessId);
+  await assertLandingCatalogReferences(input, owner.businessId);
   page.isPublished = true;
   page.publishedVariantId = variant._id;
   page.publishedSnapshot = {
     variantId: String(variant._id),
     name: input.name,
+    schemaVersion: input.schemaVersion ?? 1,
+    template: input.template,
+    goal: input.goal,
     theme: input.theme,
     commerce: input.commerce,
     sections: input.sections,
@@ -293,7 +386,7 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
   const menuItems = hasEnabledCatalog({ sections }, "MENU")
     ? await getLandingMenuItems(page.businessId)
     : [];
-  const catalogItems = await getPublishedCatalogItems(page.businessId, { sections });
+  const catalogItems = await getPublishedCatalogItems(page.businessId, { ...snapshot, sections });
   response.set("Cache-Control", "no-store");
   response.json({
     slug: page.slug,
@@ -302,6 +395,9 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     seoDescription: snapshot.seoDescription,
     publishedAt: page.publishedAt,
     variant: {
+      schemaVersion: snapshot.schemaVersion ?? 1,
+      template: snapshot.template,
+      goal: snapshot.goal,
       theme: snapshot.theme,
       commerce,
       sections,

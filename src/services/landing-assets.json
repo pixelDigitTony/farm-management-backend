@@ -1,0 +1,1044 @@
+{
+  "assets": {
+    "market-hero": {
+      "url": "/landing-assets/web/bold-market/market-hero-1536.webp",
+      "alt": "Grilled sliced steak with tomatoes and garlic on a walnut serving board.",
+      "focalPoint": {
+        "x": 0.68,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-hero-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-hero-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-hero-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "market-board": {
+      "url": "/landing-assets/web/bold-market/market-board-1536.webp",
+      "alt": "Serving board with grilled steak, tomatoes and roasted garlic.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-board-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-board-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-board-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "market-herbs": {
+      "url": "/landing-assets/web/bold-market/market-herbs-1254.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-herbs-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-herbs-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-herbs-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "market-ribeye": {
+      "url": "/landing-assets/web/bold-market/market-ribeye-1254.webp",
+      "alt": "Raw marbled ribeye steak on a wooden board.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-ribeye-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-ribeye-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-ribeye-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "market-ribs": {
+      "url": "/landing-assets/web/bold-market/market-ribs-1254.webp",
+      "alt": "Fresh pork ribs on a walnut cutting board.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-ribs-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-ribs-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-ribs-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "market-sausages": {
+      "url": "/landing-assets/web/bold-market/market-sausages-1254.webp",
+      "alt": "Four fresh sausages on a cream plate.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-sausages-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-sausages-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-sausages-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "market-craft": {
+      "url": "/landing-assets/web/bold-market/market-craft-1536.webp",
+      "alt": "A cook uses tongs to turn steak on a charcoal grill.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-craft-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-craft-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-craft-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "studio-portrait": {
+      "url": "/landing-assets/web/editorial-studio/studio-portrait-1024.webp",
+      "alt": "Model wearing a cobalt blazer with ivory trousers.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1024,
+      "height": 1536,
+      "sources": [
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-portrait-480.webp",
+          "width": 480,
+          "height": 720
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-portrait-960.webp",
+          "width": 960,
+          "height": 1440
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-portrait-1024.webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    "studio-bag": {
+      "url": "/landing-assets/web/editorial-studio/studio-bag-1254.webp",
+      "alt": "Cobalt leather crescent shoulder bag.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-bag-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-bag-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-bag-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "studio-linen": {
+      "url": "/landing-assets/web/editorial-studio/studio-linen-1024.webp",
+      "alt": "Model wearing an ivory linen waistcoat and trousers.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1024,
+      "height": 1536,
+      "sources": [
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-linen-480.webp",
+          "width": 480,
+          "height": 720
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-linen-960.webp",
+          "width": 960,
+          "height": 1440
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-linen-1024.webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    "studio-shoes": {
+      "url": "/landing-assets/web/editorial-studio/studio-shoes-1254.webp",
+      "alt": "Chartreuse slingback shoes on a lilac surface.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-shoes-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-shoes-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-shoes-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "studio-material": {
+      "url": "/landing-assets/web/editorial-studio/studio-material-1536.webp",
+      "alt": "Close-up of cobalt leather, ivory linen and chartreuse fabric.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-material-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-material-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-material-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "haven-exterior": {
+      "url": "/landing-assets/web/architectural-escape/haven-exterior-1536.webp",
+      "alt": "Illustrative limestone villa with a terrace and pool.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-exterior-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-exterior-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-exterior-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "haven-interior": {
+      "url": "/landing-assets/web/architectural-escape/haven-interior-1536.webp",
+      "alt": "Illustrative limestone living room with linen seating.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-interior-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-interior-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-interior-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "haven-courtyard": {
+      "url": "/landing-assets/web/architectural-escape/haven-courtyard-1536.webp",
+      "alt": "Illustrative olive-tree courtyard and reflecting pool.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-courtyard-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-courtyard-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-courtyard-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "haven-bedroom": {
+      "url": "/landing-assets/web/architectural-escape/haven-bedroom-1536.webp",
+      "alt": "Illustrative bedroom with ivory bedding and forest-green accents.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-bedroom-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-bedroom-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-bedroom-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "haven-foliage": {
+      "url": "/landing-assets/web/architectural-escape/haven-foliage-1254.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-foliage-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-foliage-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-foliage-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "boutique-red": {
+      "url": "/landing-assets/web/everyday-boutique/boutique-red-1024.webp",
+      "alt": "Model wearing a burgundy satin dress with a ruffled hem.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1024,
+      "height": 1536,
+      "sources": [
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-red-480.webp",
+          "width": 480,
+          "height": 720
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-red-960.webp",
+          "width": 960,
+          "height": 1440
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-red-1024.webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    "boutique-pink": {
+      "url": "/landing-assets/web/everyday-boutique/boutique-pink-1024.webp",
+      "alt": "Blush pink lace dress with a tiered skirt on a dress form.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1024,
+      "height": 1536,
+      "sources": [
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-pink-480.webp",
+          "width": 480,
+          "height": 720
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-pink-960.webp",
+          "width": 960,
+          "height": 1440
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-pink-1024.webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    "boutique-sequin": {
+      "url": "/landing-assets/web/everyday-boutique/boutique-sequin-1024.webp",
+      "alt": "Model wearing a rose-gold sequin top and skirt.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1024,
+      "height": 1536,
+      "sources": [
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-sequin-480.webp",
+          "width": 480,
+          "height": 720
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-sequin-960.webp",
+          "width": 960,
+          "height": 1440
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-sequin-1024.webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    "boutique-dots": {
+      "url": "/landing-assets/web/everyday-boutique/boutique-dots-1024.webp",
+      "alt": "Polka-dot halter blouse and shorts displayed on a dress form.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1024,
+      "height": 1536,
+      "sources": [
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-dots-480.webp",
+          "width": 480,
+          "height": 720
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-dots-960.webp",
+          "width": 960,
+          "height": 1440
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-dots-1024.webp",
+          "width": 1024,
+          "height": 1536
+        }
+      ]
+    },
+    "farm-piglets": {
+      "url": "/landing-assets/web/farm-and-market/farm-piglets-1536.webp",
+      "alt": "Three pigs standing in a shaded farm pen.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1536,
+      "height": 1024,
+      "sources": [
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-piglets-480.webp",
+          "width": 480,
+          "height": 320
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-piglets-960.webp",
+          "width": 960,
+          "height": 640
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-piglets-1536.webp",
+          "width": 1536,
+          "height": 1024
+        }
+      ]
+    },
+    "farm-packed-pork": {
+      "url": "/landing-assets/web/farm-and-market/farm-packed-pork-1254.webp",
+      "alt": "Four transparent packs of pork cuts with blank labels.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-packed-pork-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-packed-pork-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-packed-pork-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "farm-cooked-meal": {
+      "url": "/landing-assets/web/farm-and-market/farm-cooked-meal-1254.webp",
+      "alt": "Crisp pork belly, rice and dipping sauce on a plate.",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1254,
+      "height": 1254,
+      "sources": [
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-cooked-meal-480.webp",
+          "width": 480,
+          "height": 480
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-cooked-meal-960.webp",
+          "width": 960,
+          "height": 960
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-cooked-meal-1254.webp",
+          "width": 1254,
+          "height": 1254
+        }
+      ]
+    },
+    "boutique-3d-background-mobile": {
+      "url": "/landing-assets/web/everyday-boutique/boutique-3d-background-mobile-960.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 960,
+      "height": 1200,
+      "sources": [
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-3d-background-mobile-480.webp",
+          "width": 480,
+          "height": 600
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-3d-background-mobile-960.webp",
+          "width": 960,
+          "height": 1200
+        }
+      ]
+    },
+    "boutique-3d-background": {
+      "url": "/landing-assets/web/everyday-boutique/boutique-3d-background-1536.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1920,
+      "height": 1080,
+      "sources": [
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-3d-background-480.webp",
+          "width": 480,
+          "height": 270
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-3d-background-960.webp",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "url": "/landing-assets/web/everyday-boutique/boutique-3d-background-1536.webp",
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    "farm-3d-landscape-mobile": {
+      "url": "/landing-assets/web/farm-and-market/farm-3d-landscape-mobile-960.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 960,
+      "height": 1200,
+      "sources": [
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-3d-landscape-mobile-480.webp",
+          "width": 480,
+          "height": 600
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-3d-landscape-mobile-960.webp",
+          "width": 960,
+          "height": 1200
+        }
+      ]
+    },
+    "farm-3d-landscape": {
+      "url": "/landing-assets/web/farm-and-market/farm-3d-landscape-1536.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1920,
+      "height": 1080,
+      "sources": [
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-3d-landscape-480.webp",
+          "width": 480,
+          "height": 270
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-3d-landscape-960.webp",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "url": "/landing-assets/web/farm-and-market/farm-3d-landscape-1536.webp",
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    "haven-3d-courtyard": {
+      "url": "/landing-assets/web/architectural-escape/haven-3d-courtyard-1536.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1920,
+      "height": 1080,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-courtyard-480.webp",
+          "width": 480,
+          "height": 270
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-courtyard-960.webp",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-courtyard-1536.webp",
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    "haven-3d-exterior-mobile": {
+      "url": "/landing-assets/web/architectural-escape/haven-3d-exterior-mobile-960.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 960,
+      "height": 1200,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-exterior-mobile-480.webp",
+          "width": 480,
+          "height": 600
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-exterior-mobile-960.webp",
+          "width": 960,
+          "height": 1200
+        }
+      ]
+    },
+    "haven-3d-exterior": {
+      "url": "/landing-assets/web/architectural-escape/haven-3d-exterior-1536.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1920,
+      "height": 1080,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-exterior-480.webp",
+          "width": 480,
+          "height": 270
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-exterior-960.webp",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-exterior-1536.webp",
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    "haven-3d-interior": {
+      "url": "/landing-assets/web/architectural-escape/haven-3d-interior-1536.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1920,
+      "height": 1080,
+      "sources": [
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-interior-480.webp",
+          "width": 480,
+          "height": 270
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-interior-960.webp",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "url": "/landing-assets/web/architectural-escape/haven-3d-interior-1536.webp",
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    "market-3d-background-mobile": {
+      "url": "/landing-assets/web/bold-market/market-3d-background-mobile-960.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 960,
+      "height": 1200,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-3d-background-mobile-480.webp",
+          "width": 480,
+          "height": 600
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-3d-background-mobile-960.webp",
+          "width": 960,
+          "height": 1200
+        }
+      ]
+    },
+    "market-3d-background": {
+      "url": "/landing-assets/web/bold-market/market-3d-background-1536.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1920,
+      "height": 1080,
+      "sources": [
+        {
+          "url": "/landing-assets/web/bold-market/market-3d-background-480.webp",
+          "width": 480,
+          "height": 270
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-3d-background-960.webp",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "url": "/landing-assets/web/bold-market/market-3d-background-1536.webp",
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    },
+    "studio-3d-background-mobile": {
+      "url": "/landing-assets/web/editorial-studio/studio-3d-background-mobile-960.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 960,
+      "height": 1200,
+      "sources": [
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-3d-background-mobile-480.webp",
+          "width": 480,
+          "height": 600
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-3d-background-mobile-960.webp",
+          "width": 960,
+          "height": 1200
+        }
+      ]
+    },
+    "studio-3d-background": {
+      "url": "/landing-assets/web/editorial-studio/studio-3d-background-1536.webp",
+      "alt": "",
+      "focalPoint": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "aspectRatio": "AUTO",
+      "width": 1920,
+      "height": 1080,
+      "sources": [
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-3d-background-480.webp",
+          "width": 480,
+          "height": 270
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-3d-background-960.webp",
+          "width": 960,
+          "height": 540
+        },
+        {
+          "url": "/landing-assets/web/editorial-studio/studio-3d-background-1536.webp",
+          "width": 1536,
+          "height": 864
+        }
+      ]
+    }
+  },
+  "scenes": [
+    {
+      "id": "market-background",
+      "revision": 1,
+      "label": "Bold Market",
+      "glb": "/landing-assets/models/market-background.glb",
+      "poster": "/landing-assets/web/bold-market/market-3d-background-1536.webp",
+      "mobilePoster": "/landing-assets/web/bold-market/market-3d-background-mobile-960.webp",
+      "desktopCamera": "Desktop",
+      "mobileCamera": "Mobile",
+      "draco": false
+    },
+    {
+      "id": "studio-background",
+      "revision": 1,
+      "label": "Editorial Studio",
+      "glb": "/landing-assets/models/studio-background.glb",
+      "poster": "/landing-assets/web/editorial-studio/studio-3d-background-1536.webp",
+      "mobilePoster": "/landing-assets/web/editorial-studio/studio-3d-background-mobile-960.webp",
+      "desktopCamera": "Desktop",
+      "mobileCamera": "Mobile",
+      "draco": false
+    },
+    {
+      "id": "haven-scenery",
+      "revision": 1,
+      "label": "Architectural Escape",
+      "glb": "/landing-assets/models/haven-scenery.glb",
+      "poster": "/landing-assets/web/architectural-escape/haven-3d-exterior-1536.webp",
+      "mobilePoster": "/landing-assets/web/architectural-escape/haven-3d-exterior-mobile-960.webp",
+      "desktopCamera": "Exterior desktop",
+      "mobileCamera": "Exterior mobile",
+      "draco": true
+    },
+    {
+      "id": "boutique-background",
+      "revision": 1,
+      "label": "Boutique Classic",
+      "glb": "/landing-assets/models/boutique-background.glb",
+      "poster": "/landing-assets/web/everyday-boutique/boutique-3d-background-1536.webp",
+      "mobilePoster": "/landing-assets/web/everyday-boutique/boutique-3d-background-mobile-960.webp",
+      "desktopCamera": "Desktop",
+      "mobileCamera": "Mobile",
+      "draco": false
+    },
+    {
+      "id": "farm-scenery",
+      "revision": 1,
+      "label": "Farm & Market",
+      "glb": "/landing-assets/models/farm-scenery.glb",
+      "poster": "/landing-assets/web/farm-and-market/farm-3d-landscape-1536.webp",
+      "mobilePoster": "/landing-assets/web/farm-and-market/farm-3d-landscape-mobile-960.webp",
+      "desktopCamera": "Farm desktop",
+      "mobileCamera": "Farm mobile",
+      "draco": true
+    }
+  ]
+}
