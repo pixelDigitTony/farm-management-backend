@@ -38,15 +38,62 @@ export const imageConfig = {
 if (imageConfig.avifMin > imageConfig.avifMax || imageConfig.webpMin > imageConfig.webpMax)
   throw new Error("Invalid image quality bounds");
 export type ImageProfile = keyof typeof imageConfig.dimensions;
-export const pipelineVersion =
+// Keep these controls outside imageConfig: its property order/hash is the legacy cache key.
+const engine = process.env.IMAGE_PROCESSOR ?? "sharp";
+if (engine !== "sharp" && engine !== "rust") throw new Error("Invalid IMAGE_PROCESSOR");
+const uploads = process.env.IMAGE_UPLOADS_ENABLED ?? "true";
+if (!["true", "false"].includes(uploads)) throw new Error("Invalid IMAGE_UPLOADS_ENABLED");
+export const processorConfig = {
+  engine,
+  uploadsEnabled: uploads === "true",
+  binary: process.env.IMAGE_RUST_BIN ?? "",
+};
+export let pipelineVersion =
   "adaptive-v1-sharp-0.35.4-libjxl-0.11.1-" +
   createHash("sha256")
     .update(JSON.stringify({ ...imageConfig, staging: "", metric: "" }))
     .digest("hex")
     .slice(0, 16);
+export function setRustPipeline(build: unknown) {
+  if (processorConfig.engine !== "rust") throw new Error("Rust engine is not selected");
+  const {
+    maxBytes,
+    maxPixels,
+    maxFrames,
+    maxOutput,
+    threshold,
+    avifMin,
+    avifMax,
+    webpMin,
+    webpMax,
+    effort,
+    dimensions,
+  } = imageConfig;
+  pipelineVersion = `adaptive-v1-rust-${createHash("sha256")
+    .update(
+      JSON.stringify({
+        build,
+        maxBytes,
+        maxPixels,
+        maxFrames,
+        maxOutput,
+        threshold,
+        avifMin,
+        avifMax,
+        webpMin,
+        webpMax,
+        effort,
+        dimensions,
+      }),
+    )
+    .digest("hex")
+    .slice(0, 32)}`;
+}
 export function assertImageConfig() {
   if (!imageConfig.staging || !imageConfig.metric)
     throw new Error(
       "Configure persistent IMAGE_STAGING_DIR and pinned SSIMULACRA2_BIN; see deploy/IMAGES.md",
     );
+  if (processorConfig.engine === "rust" && !processorConfig.binary)
+    throw new Error("Configure IMAGE_RUST_BIN for the Rust image processor");
 }

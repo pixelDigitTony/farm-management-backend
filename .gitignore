@@ -13,4 +13,5 @@ artifacts/
 
 deploy/.env.images
 .image-staging/
+native/image-processor/target/
 bun.lock

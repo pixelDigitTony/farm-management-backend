@@ -4,15 +4,29 @@ RUN git clone https://github.com/libjxl/libjxl.git /opt/libjxl && cd /opt/libjxl
 RUN cmake -S /opt/libjxl -B /opt/libjxl/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DJPEGXL_ENABLE_DEVTOOLS=ON -DJPEGXL_ENABLE_MANPAGES=OFF -DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF && cmake --build /opt/libjxl/build --target ssimulacra2 -j2
 ENV SSIMULACRA2_BIN=/opt/libjxl/build/tools/ssimulacra2
 
-FROM metric AS app
+FROM node:24-bookworm@sha256:6dac556d980b7f0e5498d08f08cee0ca67798b4ad6c23964a9214920e67758d0 AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
+
+FROM rust:1.90.0-bookworm AS processor
+RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev pkg-config && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY --from=dependencies /app/node_modules/@img/ /opt/img/
+ENV FARM_VIPS_BUNDLE_ROOT=/opt/img
+COPY native/image-processor/ ./
+RUN cargo build --release --locked && cargo test --locked && cargo fmt --check && cargo clippy --locked -- -D warnings
+
+FROM metric AS app
+COPY --from=processor /build/target/release/farm-image-processor /usr/local/bin/farm-image-processor
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY --from=dependencies /app/node_modules/ ./node_modules/
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts/run-backend.mjs ./scripts/run-backend.mjs
 RUN npm run build && npm prune --omit=dev
 RUN mkdir -p /var/lib/farm-images && chown node:node /var/lib/farm-images && chmod 700 /var/lib/farm-images
-ENV NODE_ENV=production IMAGE_STAGING_DIR=/var/lib/farm-images
+ENV NODE_ENV=production IMAGE_STAGING_DIR=/var/lib/farm-images IMAGE_RUST_BIN=/usr/local/bin/farm-image-processor
 USER node
 CMD ["node", "dist/server.js"]

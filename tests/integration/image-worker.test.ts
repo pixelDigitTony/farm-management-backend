@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import mongoose from "mongoose";
@@ -122,6 +122,81 @@ it("runs upload through the actual executable backend, then reuses a verified so
     ready.imageId.toString(),
   );
 }, 90_000);
+it("cancels an active encode, removes its work directory and never completes it", async () => {
+  const pixels = Buffer.alloc(512 * 384 * 3);
+  let seed = 21999;
+  for (let index = 0; index < pixels.length; index++) {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    pixels[index] = seed & 255;
+  }
+  const bytes = await sharp(pixels, { raw: { width: 512, height: 384, channels: 3 } })
+    .png()
+    .toBuffer();
+  const uploaded = await request(api)
+    .post("/api/images/jobs?scope=catalog&profile=photo")
+    .auth(token, { type: "bearer" })
+    .set("Content-Type", "application/octet-stream")
+    .send(bytes)
+    .expect(202);
+  let processing = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const job = await ImageJob.findById(uploaded.body.jobId).lean();
+    if (job.state === "processing") {
+      processing = true;
+      break;
+    }
+    if (job.state === "ready" || job.state === "failed") break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  expect(processing).toBe(true);
+  await request(api)
+    .delete(`/api/images/jobs/${uploaded.body.jobId}`)
+    .auth(token, { type: "bearer" })
+    .expect(204);
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const files = await readdir(directory);
+    if (!files.some((file) => file.startsWith(`${uploaded.body.jobId}.work-`))) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  expect(
+    (await readdir(directory)).some((file) => file.startsWith(`${uploaded.body.jobId}.work-`)),
+  ).toBe(false);
+  const cancelled = await ImageJob.findById(uploaded.body.jobId).lean();
+  expect(cancelled.state).toBe("failed");
+  expect(cancelled.imageId).toBeUndefined();
+});
+
+it("pauses new uploads while retaining processing readiness and existing image delivery", async () => {
+  const image = await StoredImage.findOne().lean();
+  expect(image).toBeTruthy();
+  await halt();
+  backendEnv.IMAGE_UPLOADS_ENABLED = "false";
+  try {
+    await launch();
+    const health = await request(api)
+      .get("/api/images/health")
+      .auth(token, { type: "bearer" })
+      .expect(200);
+    expect(health.body).toMatchObject({
+      ready: true,
+      uploadsEnabled: false,
+      engine: process.env.IMAGE_PROCESSOR ?? "sharp",
+    });
+    await request(api)
+      .post("/api/images/jobs?scope=catalog&profile=photo")
+      .auth(token, { type: "bearer" })
+      .set("Content-Type", "application/octet-stream")
+      .send(Buffer.from("paused"))
+      .expect(503);
+    await request(api).get(`/api/images/${image._id}`).auth(token, { type: "bearer" }).expect(200);
+  } finally {
+    await halt();
+    backendEnv.IMAGE_UPLOADS_ENABLED = "true";
+    await launch();
+  }
+});
 it("recovers a queued job after a backend restart without altering application records", async () => {
   const bytes = await sharp({
     create: { width: 60, height: 40, channels: 4, background: "#5588aa80" },

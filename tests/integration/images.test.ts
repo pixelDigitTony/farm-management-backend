@@ -6,7 +6,7 @@ import sharp from "sharp";
 import request from "supertest";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { app } from "../../src/app.js";
-import { imageConfig as c, pipelineVersion } from "../../src/images/config.js";
+import { imageConfig as c, pipelineVersion, processorConfig } from "../../src/images/config.js";
 import {
   acquireLock,
   claimJob,
@@ -25,7 +25,11 @@ import { startTestDatabase } from "./database.js";
 
 // These queue tests control job claims manually; executable API tests exercise the real service.
 vi.mock("../../src/images/service.js", () => ({
-  imageProcessingStatus: () => ({ ready: true, lastError: null }),
+  imageProcessingStatus: () => ({
+    ready: true,
+    lastError: null,
+    uploadsEnabled: processorConfig.uploadsEnabled,
+  }),
 }));
 
 let stop: (() => Promise<void>) | undefined;
@@ -61,6 +65,24 @@ const owner = () => ({
   pipelineVersion,
 });
 const output = () => ({ bytes, mime: "image/png", width: 32, height: 16 });
+it("pauses admission without disabling completed image delivery", async () => {
+  const existing = await storeOutput(fixture.business._id, output(), "photo");
+  processorConfig.uploadsEnabled = false;
+  try {
+    await request(app)
+      .post("/api/images/jobs?scope=catalog&profile=photo")
+      .auth(token, { type: "bearer" })
+      .set("Content-Type", "application/octet-stream")
+      .send(bytes)
+      .expect(503);
+    await request(app)
+      .get(`/api/images/${existing._id}`)
+      .auth(token, { type: "bearer" })
+      .expect(200);
+  } finally {
+    processorConfig.uploadsEnabled = true;
+  }
+});
 it("lists the company library across profiles without exposing another tenant or binary data", async () => {
   const own = await storeOutput(fixture.business._id, output(), "photo");
   const second = await storeOutput(

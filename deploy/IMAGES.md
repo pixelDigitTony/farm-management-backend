@@ -1,5 +1,24 @@
 # Adaptive image uploads
 
+## Rust processor option
+
+The backend packages an experimental `farm-image-processor` executable alongside Sharp. Keep `IMAGE_PROCESSOR=sharp` until the correctness, memory and performance gates in [the Rust specification](RUST-IMAGE-PROCESSING-SPEC.md) pass on representative target workloads. Select `IMAGE_PROCESSOR=rust` with `IMAGE_RUST_BIN=/usr/local/bin/farm-image-processor` to use it in isolated staging. Startup exercises JPEG/PNG/WebP/AVIF and the pinned metric before accepting uploads. A failing self-test leaves existing image delivery available and rejects new uploads with 503.
+
+Rust retains libvips through a small C++ ownership bridge and the pinned SSIMULACRA2 CLI. Docker links it to the same native bundle used by Sharp, pinned through package-lock; native builds must set `FARM_VIPS_BUNDLE_ROOT` to `node_modules/@img`. It caches normalized pixels/reference composites and retains only the best passing candidate. It does not require a separate worker service. The backend checks child responses, output size/hash/actual format and dimensions, and job ownership before storage. Both engines now observe cancellation from other API instances every second. The supervisor kills the child process tree before attempt cleanup.
+
+`IMAGE_UPLOADS_ENABLED=false` disables admission while processing queued jobs and existing image delivery continue. Drain all queued/retry/processing jobs before changing engines or output policy. The legacy Sharp fingerprint is retained; Rust fingerprints its executable, reported native build and output policy. There is no automatic cross-engine fallback or job relabeling. Keep database/staging data during rollback; follow the spec's drain-and-switch procedure.
+
+Offline comparisons after `npm run build`:
+
+```sh
+SSIMULACRA2_BIN=/absolute/ssimulacra2 IMAGE_RUST_BIN=/absolute/farm-image-processor node scripts/benchmark-image-engines.mjs manifest.json report.json
+SSIMULACRA2_BIN=/absolute/ssimulacra2 IMAGE_RUST_BIN=/absolute/farm-image-processor node scripts/verify-image-normalization.mjs normalization-report.json
+```
+
+The manifest contains `fixtures: [{"path":"/authorized/photo.jpg","sha256":"<full hash>","category":"product-photo"}]`, optional `engines: ["baseline","tuned","rust"]`, `profiles: ["avatar","photo","display","preserve"]`, and `passes: 5`. Each engine is checked against a common Sharp-normalized reference. The baseline remains the production Sharp algorithm; tuned mode is an offline comparison with reference reuse and lower candidate retention. Report limitations explicitly exclude network/queue/storage/UI latency and child-inclusive memory/CPU; those release gates require target-environment measurements. Do not infer adoption from component timings.
+
+Use `npm run images:fixtures -- artifacts/image-fixtures 100` for a deterministic synthetic manifest. Add representative authorized photographs and boundary cases; generated patterns alone do not establish production acceptance. See [the verification record](RUST-IMAGE-VERIFICATION.md) for measured results and current release limitations.
+
 The catalog product editor, shared menu media controls (Menu and Sales & cooking), and landing-page hero/gallery editor now accept local photos. Existing HTTPS URLs, Drive links and video embeds stay supported. Upload completion only updates the open form. The existing authorized Save/Apply/Save draft/Publish actions remain responsible for attaching and publishing images; the processor never edits application records.
 
 References use `/api/images/<imageId>` in the existing media URL fields. This retains existing record/API shapes while referencing an ObjectId in the separate `storedimages` collection. Binary is excluded from normal queries. There is no original-media migration.

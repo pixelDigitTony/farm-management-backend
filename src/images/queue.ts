@@ -10,6 +10,7 @@ import {
   imageConfig as c,
   type ImageProfile,
   pipelineVersion,
+  processorConfig,
 } from "./config.js";
 import { assertActiveImage } from "./library.js";
 export async function prepareStaging() {
@@ -58,6 +59,8 @@ export async function stageUpload(
   scope: string,
   profile: ImageProfile,
 ) {
+  if (!processorConfig.uploadsEnabled)
+    throw new HttpError(503, "Image uploads are paused for maintenance. Retry later");
   try {
     assertImageConfig();
     await access(c.metric, constants.X_OK);

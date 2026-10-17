@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { app } from "../../src/app.js";
-import { imageConfig as c, pipelineVersion } from "../../src/images/config.js";
+import { imageConfig as c, pipelineVersion, processorConfig } from "../../src/images/config.js";
 import { trashedImageMessage } from "../../src/images/library.js";
 import { claimJob, finishJob, storeOutput } from "../../src/images/queue.js";
 import { assertImageReferences } from "../../src/images/references.js";
@@ -14,7 +14,9 @@ import { Business, CatalogProduct, User } from "../../src/models/index.js";
 import { seedBrowserFixtures, testCredentials } from "../support/seed.js";
 import { startTestDatabase } from "./database.js";
 
-vi.mock("../../src/images/service.js", () => ({ imageProcessingStatus: () => ({ ready: true }) }));
+vi.mock("../../src/images/service.js", () => ({
+  imageProcessingStatus: () => ({ ready: true, uploadsEnabled: processorConfig.uploadsEnabled }),
+}));
 let stop: (() => Promise<void>) | undefined;
 let fixture: Awaited<ReturnType<typeof seedBrowserFixtures>>;
 let token: string;

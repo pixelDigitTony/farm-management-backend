@@ -44,3 +44,23 @@ it.runIf(Boolean(process.env.SSIMULACRA2_BIN))(
   },
   30_000,
 );
+
+it.runIf(Boolean(process.env.SSIMULACRA2_BIN))(
+  "tuned Sharp keeps the baseline candidates, scores and chosen bytes",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "quality-parity-"));
+    try {
+      const source = join(directory, "source");
+      await sharp({ create: { width: 48, height: 32, channels: 4, background: "#ab678880" } })
+        .png()
+        .toFile(source);
+      const baseline = await compressImage(source, "photo", directory, "baseline");
+      const tuned = await compressImage(source, "photo", directory, "tuned");
+      expect(tuned.bytes).toEqual(baseline.bytes);
+      expect(tuned.evaluated).toEqual(baseline.evaluated);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  120000,
+);

@@ -23,3 +23,13 @@ The `verify` command generates a temporary image, checks SSIMULACRA2 against an 
 ```
 
 Run `start` again after backend code changes to rebuild the image. Keep the staging volume when stopping/restarting. This setup installs SSIMULACRA2 inside Docker; it does not provide a Windows executable for native `npm run dev`.
+
+## Rust build and staging verification
+
+The image Dockerfile now includes a pinned Rust build stage and packages both processors. The default remains `IMAGE_PROCESSOR=sharp`. For an isolated local Rust test, set `IMAGE_PROCESSOR=rust` and `IMAGE_RUST_BIN=/usr/local/bin/farm-image-processor` in the local backend configuration, drain existing jobs before switching, then rebuild using the existing local start command. The engine self-test must pass before uploads become ready. Preserve the staging volume.
+
+Use `IMAGE_UPLOADS_ENABLED=false` to pause new uploads during a drain; it leaves the processing loop and image delivery running. Existing frontend API requests are compatible with either engine. See [IMAGES.md](IMAGES.md) for the offline comparison harness and [RUST-IMAGE-PROCESSING-SPEC.md](RUST-IMAGE-PROCESSING-SPEC.md) for acceptance and rollback requirements.
+
+`deploy/Dockerfile.images-test` builds a verification layer over the locally built `farm-images-rust:verification` production image, with development dependencies and integration fixtures. It runs the three image suites as the non-root `node` user. Direct Windows upload tests cannot validate POSIX staging permissions; use this Linux runner.
+
+The default database fixture uses Testcontainers. For a runner without Docker-daemon access, the host can provision a fresh MongoDB 8.0.16 replica set on an internal network under alias `image-test-mongo`. Initialize replica set `rs0` with member `image-test-mongo:27017`, then insert `{kind:'farm-image-test-fixture/v1',nonce:'<32 lowercase hex characters>'}` into `admin.farm_image_test_context`. Mount a matching JSON context read-only at `/tmp/farm-image-test-context.json` and set `TEST_IMAGE_DATABASE_CONTEXT` to that exact path. The helper verifies this marker before creating indexes and chooses a fresh random test database per suite; it accepts no external connection URI. Do not use an existing application MongoDB instance for this mode. Keep the runner and MongoDB on the private network, publish no database ports, and remove the disposable network/container afterward.

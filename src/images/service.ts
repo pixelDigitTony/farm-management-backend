@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { access, constants, mkdir, readFile, rm } from "node:fs/promises";
+import { access, constants, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { HttpError } from "../lib/http-error.js";
 import { ImageJob, ImageLock, StoredImage } from "../models/image.models.js";
-import { assertImageConfig, imageConfig as c, pipelineVersion } from "./config.js";
+import { assertImageConfig, imageConfig as c, pipelineVersion, processorConfig } from "./config.js";
 import { trashedImageMessage } from "./library.js";
 import { encodeInProcess } from "./process.js";
 import {
@@ -18,13 +18,20 @@ import {
   sourcePath,
   storeOutput,
 } from "./queue.js";
+import { prepareRustProcessor, readProcessorOutput, rustBuild } from "./rust.js";
 
 let stopping = false;
 let encoding: AbortController | undefined;
 let running: Promise<void> | undefined;
 let ready = false;
 let lastError: string | null = null;
-export const imageProcessingStatus = () => ({ ready, lastError });
+export const imageProcessingStatus = () => ({
+  ready,
+  lastError,
+  engine: processorConfig.engine,
+  uploadsEnabled: processorConfig.uploadsEnabled,
+  build: rustBuild(),
+});
 
 // Uses the API's database connection. Importing this module never starts processing.
 export async function startImageProcessing() {
@@ -34,6 +41,7 @@ export async function startImageProcessing() {
     assertImageConfig();
     await access(c.metric, constants.X_OK);
     await prepareStaging();
+    if (processorConfig.engine === "rust") await prepareRustProcessor();
     for (const model of [ImageJob, ImageLock, StoredImage]) await model.createIndexes();
     ready = true;
     lastError = null;
@@ -49,7 +57,7 @@ export async function startImageProcessing() {
   } catch (error) {
     ready = false;
     lastError =
-      "Image processing unavailable: check persistent staging and SSIMULACRA2 configuration";
+      "Image processing unavailable: check persistent staging, selected processor and SSIMULACRA2 configuration";
     console.error(lastError, error);
   }
 }
@@ -104,6 +112,8 @@ async function run() {
       }
       const directory = join(c.staging, `${job._id}.work-${token}`);
       await mkdir(directory, { mode: 0o700 });
+      let observing: Promise<void> | undefined;
+      let cancellation: ReturnType<typeof setInterval> | undefined;
       try {
         if (job.attempts > c.attempts) throw new Error("Retries exhausted");
         if (job.pipelineVersion !== pipelineVersion)
@@ -134,6 +144,19 @@ async function run() {
         }
         if (stopping || lost) throw new Error("Image processing stopped");
         encoding = new AbortController();
+        const abort = encoding;
+        cancellation = setInterval(() => {
+          if (observing) return;
+          observing = (async () => {
+            try {
+              if (!(await ImageJob.exists(ownedJob(job._id, token)))) abort.abort();
+            } catch {
+              abort.abort();
+            }
+          })().finally(() => {
+            observing = undefined;
+          });
+        }, 1000);
         const metadata = await encodeInProcess(
           sourcePath(String(job._id)),
           job.profile,
@@ -142,12 +165,10 @@ async function run() {
         );
         if (lost || stopping || !(await ImageJob.exists(ownedJob(job._id, token))))
           throw new Error("Lease lost");
-        const bytes = await readFile(join(directory, "output"));
-        const image = await storeOutput(
-          job.businessId,
-          { bytes, mime: metadata.mime, width: metadata.width, height: metadata.height },
-          job.profile,
-        );
+        const output = await readProcessorOutput(directory, metadata);
+        if (lost || stopping || !(await ImageJob.exists(ownedJob(job._id, token))))
+          throw new Error("Lease lost before storage");
+        const image = await storeOutput(job.businessId, output, job.profile);
         const completed = await finishJob(job._id, token, image._id);
         if (!completed.modifiedCount) throw new Error("Lease lost before completion");
         await rm(sourcePath(String(job._id)), { force: true });
@@ -157,8 +178,7 @@ async function run() {
         );
         console.log("Image job ready", {
           id: String(job._id),
-          bytes: bytes.length,
-          score: metadata.score,
+          bytes: output.bytes.length,
         });
       } catch (error) {
         console.error("Image job attempt failed", {
@@ -175,6 +195,8 @@ async function run() {
           error instanceof HttpError && error.status === 409,
         );
       } finally {
+        clearInterval(cancellation);
+        await observing;
         encoding = undefined;
         await rm(directory, { recursive: true, force: true });
       }

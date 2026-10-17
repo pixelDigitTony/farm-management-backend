@@ -93,26 +93,88 @@ export async function assess(reference: Buffer, bytes: Buffer, directory: string
   }
   return Math.min(...scores);
 }
-export async function compressImage(source: string, profile: ImageProfile, directory: string) {
+async function reusableAssessment(reference: Buffer, directory: string) {
+  const ref = await decode(reference).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const paths: string[] = [];
+  for (const [index, background] of ["#ffffff", "#111111"].entries()) {
+    const path = join(directory, `reference-${index}.png`);
+    await writeFile(path, await decode(reference).flatten({ background }).png().toBuffer());
+    paths.push(path);
+  }
+  return async (bytes: Buffer) => {
+    const candidate = await decode(bytes)
+      .toColourspace("srgb")
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (candidate.info.width !== ref.info.width || candidate.info.height !== ref.info.height)
+      throw new Error("Candidate dimensions changed");
+    for (let i = 3; i < ref.data.length; i += 4)
+      if (ref.data[i] !== candidate.data[i]) return -Infinity;
+    const scores: number[] = [];
+    for (const [index, background] of ["#ffffff", "#111111"].entries()) {
+      const path = join(directory, "decoded.png");
+      await writeFile(
+        path,
+        await sharp(candidate.data, { raw: candidate.info })
+          .flatten({ background })
+          .png()
+          .toBuffer(),
+      );
+      const referencePath = paths[index];
+      if (!referencePath) throw new Error("Missing reference background");
+      scores.push(await metric(referencePath, path));
+    }
+    return Math.min(...scores);
+  };
+}
+export async function compressImage(
+  source: string,
+  profile: ImageProfile,
+  directory: string,
+  mode: "baseline" | "tuned" = "baseline",
+) {
+  const start = performance.now();
+  let encodingMs = 0;
+  let assessmentMs = 0;
   const { metadata: m, reference } = await makeReference(source, profile);
   const dimensions = await decode(reference).metadata();
   if (!dimensions.width || !dimensions.height) throw new Error("Reference dimensions missing");
+  const normalizeMs = performance.now() - start;
+  const assessBytes =
+    mode === "tuned"
+      ? await reusableAssessment(reference, directory)
+      : (bytes: Buffer) => assess(reference, bytes, directory);
+  const evaluated: { mime: string; score: number; quality?: number; byteLength: number }[] = [];
   const candidates: Candidate[] = [];
+  let best: Candidate | undefined;
+  const evaluate = async (bytes: Buffer, mime: string, quality?: number) => {
+    const began = performance.now();
+    const score = await assessBytes(bytes);
+    assessmentMs += performance.now() - began;
+    const candidate = { bytes, mime, score, quality };
+    evaluated.push({ mime, score, quality, byteLength: bytes.length });
+    if (mode === "baseline") candidates.push(candidate);
+    if (
+      score >= c.threshold &&
+      bytes.length <= c.maxOutput &&
+      (!best || bytes.length < best.bytes.length)
+    )
+      best = candidate;
+    return score;
+  };
   // Even lossless routes require a functioning metric, never silently bypass validation.
-  candidates.push({
-    bytes: reference,
-    mime: "image/png",
-    score: await assess(reference, reference, directory),
-  });
+  await evaluate(reference, "image/png");
   if (profile !== "preserve") {
     for (const codec of ["avif", "webp"] as const) {
       let low = codec === "avif" ? c.avifMin : c.webpMin;
       let high = codec === "avif" ? c.avifMax : c.webpMax;
       for (let trial = 0; trial < 3 && low <= high; trial++) {
         const quality = Math.round((low + high) / 2);
+        const began = performance.now();
         const bytes = await decode(reference)[codec]({ quality, effort: c.effort }).toBuffer();
-        const score = await assess(reference, bytes, directory);
-        candidates.push({ bytes, mime: `image/${codec}`, score, quality });
+        encodingMs += performance.now() - began;
+        const score = await evaluate(bytes, `image/${codec}`, quality);
         if (score >= c.threshold) high = quality - 1;
         else low = quality + 1;
       }
@@ -132,13 +194,9 @@ export async function compressImage(source: string, profile: ImageProfile, direc
     (profile !== "preserve" || m.format === "png")
   ) {
     const bytes = await readFile(source);
-    candidates.push({
-      bytes,
-      mime: m.format === "heif" ? "image/avif" : `image/${m.format}`,
-      score: await assess(reference, bytes, directory),
-    });
+    await evaluate(bytes, m.format === "heif" ? "image/avif" : `image/${m.format}`);
   }
-  const chosen = smallestPassing(candidates);
+  const chosen = mode === "baseline" ? smallestPassing(candidates) : best;
   if (!chosen)
     throw new Error(
       "No image meets quality and storage limits; use a smaller source or preservation profile",
@@ -147,6 +205,12 @@ export async function compressImage(source: string, profile: ImageProfile, direc
     ...chosen,
     width: dimensions.width,
     height: dimensions.height,
-    evaluated: candidates.map(({ bytes, ...rest }) => ({ ...rest, byteLength: bytes.length })),
+    evaluated,
+    timingsMs: {
+      normalize: normalizeMs,
+      encode: encodingMs,
+      assessment: assessmentMs,
+      total: performance.now() - start,
+    },
   };
 }

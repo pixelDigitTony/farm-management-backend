@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   encode: vi.fn(),
   fail: vi.fn(),
   finish: vi.fn(),
+  exists: vi.fn(),
+  rust: vi.fn(),
 }));
 vi.mock("node:fs/promises", () => ({
   access: mocks.access,
@@ -24,13 +26,19 @@ vi.mock("../src/images/config.js", () => ({
   assertImageConfig: mocks.assert,
   imageConfig: { metric: "/metric", staging: "/staging", leaseMs: 60000, attempts: 3 },
   pipelineVersion: "test",
+  processorConfig: { engine: "sharp", uploadsEnabled: true },
 }));
 vi.mock("../src/models/image.models.js", () => ({
-  ImageJob: { createIndexes: mocks.indexes },
+  ImageJob: { createIndexes: mocks.indexes, exists: mocks.exists },
   ImageLock: { createIndexes: mocks.indexes },
   StoredImage: { createIndexes: mocks.indexes },
 }));
 vi.mock("../src/images/process.js", () => ({ encodeInProcess: mocks.encode }));
+vi.mock("../src/images/rust.js", () => ({
+  prepareRustProcessor: mocks.rust,
+  readProcessorOutput: vi.fn(),
+  rustBuild: () => undefined,
+}));
 vi.mock("../src/images/queue.js", () => ({
   acquireLock: mocks.acquire,
   releaseLock: mocks.release,
@@ -44,6 +52,7 @@ vi.mock("../src/images/queue.js", () => ({
   storeOutput: vi.fn(),
 }));
 
+import { processorConfig } from "../src/images/config.js";
 import {
   imageProcessingStatus,
   startImageProcessing,
@@ -57,6 +66,8 @@ beforeEach(() => {
   mocks.access.mockResolvedValue(undefined);
   mocks.acquire.mockResolvedValue(true);
   mocks.claim.mockResolvedValue(null);
+  mocks.exists.mockResolvedValue(true);
+  processorConfig.engine = "sharp";
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
@@ -98,6 +109,14 @@ it("waits when another instance owns the singleton lease", async () => {
   expect(imageProcessingStatus().ready).toBe(true);
 });
 
+it("requires a successful Rust self-test before claiming jobs", async () => {
+  processorConfig.engine = "rust";
+  mocks.rust.mockRejectedValueOnce(new Error("Codec unavailable"));
+  await startImageProcessing();
+  expect(imageProcessingStatus().ready).toBe(false);
+  expect(mocks.claim).not.toHaveBeenCalled();
+});
+
 it("reports a stopped loop and can restart after a database failure", async () => {
   mocks.acquire.mockRejectedValueOnce(new Error("Database disconnected"));
   await startImageProcessing();
@@ -126,4 +145,22 @@ it("aborts an active encode before releasing its lease and never publishes its o
   expect(mocks.release).toHaveBeenCalledOnce();
   expect(mocks.finish).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("observes cancellation from another API instance and stops the child before cleanup", async () => {
+  const job = { _id: "cancelled-job", attempts: 1, pipelineVersion: "test", profile: "photo" };
+  mocks.claim.mockResolvedValueOnce(job);
+  mocks.exists.mockResolvedValue(null);
+  let signal: AbortSignal | undefined;
+  mocks.encode.mockImplementation((_source, _profile, _directory, abort: AbortSignal) => {
+    signal = abort;
+    return new Promise((_resolve, reject) =>
+      abort.addEventListener("abort", () => reject(new Error("Cancelled")), { once: true }),
+    );
+  });
+  await startImageProcessing();
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(signal?.aborted).toBe(true);
+  expect(mocks.finish).not.toHaveBeenCalled();
+  expect(mocks.fail).toHaveBeenCalledOnce();
 });

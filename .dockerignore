@@ -8,3 +8,13 @@
 !scripts/run-backend.mjs
 !deploy/
 !deploy/Dockerfile.images
+!deploy/Dockerfile.images-test
+!native/
+!native/image-processor/
+!native/image-processor/**
+native/image-processor/target/
+!tests/
+!tests/**
+!vitest.integration.config.ts
+!tsconfig.test.json
+!scripts/verify-image-normalization.mjs

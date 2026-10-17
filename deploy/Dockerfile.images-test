@@ -1,0 +1,11 @@
+# Isolated verification layer over the actual production image. No .env files are copied.
+FROM farm-images-rust:verification
+USER root
+RUN npm ci --include=dev
+COPY tests/ ./tests/
+COPY vitest.integration.config.ts tsconfig.test.json ./
+COPY scripts/verify-image-normalization.mjs ./scripts/verify-image-normalization.mjs
+RUN chown node:node /app /app/node_modules
+ENV NODE_ENV=test EMAIL_PROVIDER=console
+USER node
+CMD ["node", "node_modules/vitest/vitest.mjs", "run", "--config", "vitest.integration.config.ts", "tests/integration/images.test.ts", "tests/integration/media-library.test.ts", "tests/integration/image-worker.test.ts"]

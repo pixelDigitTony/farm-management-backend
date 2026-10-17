@@ -155,6 +155,8 @@ imageRouter.post("/jobs", async (request, response) => {
     )
       throw new HttpError(404, "Source image not found in the library");
   }
+  if (!imageProcessingStatus().uploadsEnabled)
+    throw new HttpError(503, "Image uploads are paused for maintenance. Retry later");
   if (!imageProcessingStatus().ready)
     throw new HttpError(
       503,
