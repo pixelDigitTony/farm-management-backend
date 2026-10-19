@@ -70,7 +70,7 @@ const operationModules: Record<string, string[]> = {
 // An empty list is denied; null is reserved for authentication/public or highest-only routes.
 export function requiredPermissions(rawPath: string, method = "GET"): string[] | null {
   const path = (rawPath.split("?")[0] ?? "").replace(/^\/api(?=\/)/, "");
-  const [, area = "", resource = "", , operation] = path.split("/");
+  const [, area = "", resource = ""] = path.split("/");
   if (["auth", "public", "invites", "health", "admin", "employees"].includes(area)) return null;
   let action: PermissionAction =
     method === "GET" || method === "HEAD"
@@ -105,9 +105,11 @@ export function requiredPermissions(rawPath: string, method = "GET"): string[] |
     if (
       area === "landing-page" &&
       method === "POST" &&
-      (operation === "publish" || resource === "unpublish")
+      (path.endsWith("/publish") || path.endsWith("/unpublish"))
     )
       action = "edit";
+    if (area === "catalog" && method === "POST" && resource === "availability-preview")
+      action = "view";
   }
   return modules.map((module) => `${module}:${action}`);
 }

@@ -148,6 +148,7 @@ const businessSchema = new Schema(
     },
     currency: { type: String, enum: ["PHP"], default: "PHP" },
     timezone: { type: String, default: "Asia/Manila" },
+    landingCatalogMigrationVersion: { type: Number, default: 0 },
     piggery: {
       name: { type: String, default: "Miss V Piggery" },
       address: String,

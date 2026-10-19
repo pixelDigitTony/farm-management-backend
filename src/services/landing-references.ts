@@ -1,6 +1,6 @@
 import mongoose, { type Types } from "mongoose";
 import { HttpError } from "../lib/http-error.js";
-import { CatalogProduct, MenuItem } from "../models/index.js";
+import { CatalogCategory, CatalogProduct, MenuItem } from "../models/index.js";
 
 export function landingCatalogReferences(
   value: unknown,
@@ -23,6 +23,40 @@ export function landingCatalogReferences(
   return refs;
 }
 export async function assertLandingCatalogReferences(value: unknown, businessId: Types.ObjectId) {
+  async function categories(node: any): Promise<void> {
+    if (!node || typeof node !== "object") return;
+    const binding = node.content?.categoryBinding;
+    if (binding) {
+      const legacy = node.type === "MENU" ? node.content.menuItemIds : node.content.catalogItemRefs;
+      if (legacy?.length)
+        throw new HttpError(
+          422,
+          "Convert item references before selecting categories",
+          undefined,
+          "INVALID_CATEGORY_BINDING",
+        );
+      if (binding.mode === "SELECTED_CATEGORIES" && binding.categoryIds.length) {
+        const ids = binding.categoryIds;
+        if (
+          (await CatalogCategory.countDocuments({
+            _id: { $in: ids },
+            businessId,
+            isArchived: false,
+            ...(node.type === "MENU" ? { sourceType: "MENU_ITEM" } : {}),
+          })) !== ids.length
+        )
+          throw new HttpError(
+            422,
+            "A selected category is unavailable or belongs to another business",
+            undefined,
+            "INVALID_CATEGORY_BINDING",
+          );
+      }
+    }
+    for (const child of Object.values(node))
+      if (child && typeof child === "object") await categories(child);
+  }
+  await categories(value);
   const refs = landingCatalogReferences(value);
   if (refs.some((r) => !mongoose.isValidObjectId(r.sourceId)))
     throw new HttpError(422, "Select valid business-owned catalog items");

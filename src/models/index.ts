@@ -1,4 +1,5 @@
 export * from "./calendar-todo.models.js";
+export * from "./catalog-category.models.js";
 export * from "./commerce.models.js";
 export * from "./finance.models.js";
 export * from "./inventory.models.js";

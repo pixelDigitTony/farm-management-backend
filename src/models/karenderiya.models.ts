@@ -36,6 +36,7 @@ const menuItemSchema = new Schema(
     menuCode: { type: String, required: true },
     name: { type: String, required: true },
     category: String,
+    categoryId: objectId("CatalogCategory"),
     mediaUrls: [String],
     googleDriveUrl: String,
     googleDriveUrls: [String],

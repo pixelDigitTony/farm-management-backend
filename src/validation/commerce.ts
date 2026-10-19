@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { availabilityScheduleSchema } from "../lib/product-availability.js";
 
 const requiredText = (maximum: number) =>
   v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(maximum));
@@ -63,6 +64,7 @@ export const catalogProductSchema = v.pipe(
     isFeatured: v.optional(v.boolean(), false),
     isOrderable: v.optional(v.boolean(), true),
     isActive: v.optional(v.boolean(), true),
+    availabilitySchedule: v.optional(availabilityScheduleSchema),
   }),
   v.check(
     (product) =>

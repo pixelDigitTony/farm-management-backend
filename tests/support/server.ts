@@ -14,8 +14,9 @@ try {
     response.json({ kind: "farm-disposable-fixture-v1" }),
   );
   fixtureApp.use(app);
-  const server = fixtureApp.listen(4107, "127.0.0.1", () =>
-    console.log("Disposable test API ready on 127.0.0.1:4107"),
+  const port = Number(process.env.TEST_PORT ?? 4107);
+  const server = fixtureApp.listen(port, "127.0.0.1", () =>
+    console.log(`Disposable test API ready on 127.0.0.1:${port}`),
   );
   let stopping = false;
   const stop = () => {

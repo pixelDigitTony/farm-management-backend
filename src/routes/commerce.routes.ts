@@ -3,9 +3,25 @@ import mongoose from "mongoose";
 import * as v from "valibot";
 import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
+import {
+  availabilityInfo,
+  availabilityScheduleSchema,
+  localDateAt,
+  scheduleMatchesDate,
+  shiftDate,
+  validLocalDate,
+} from "../lib/product-availability.js";
+import { inTransaction } from "../lib/transaction.js";
 import { getOwner } from "../middleware/auth.js";
 import { publicOrderLimiter } from "../middleware/rate-limit.js";
-import { CatalogDiscount, CatalogProduct, CustomerOrder } from "../models/index.js";
+import {
+  AuditLog,
+  Business,
+  CatalogDiscount,
+  CatalogProduct,
+  CustomerOrder,
+} from "../models/index.js";
+import { catalogCategories, resolveCategory } from "../services/catalog-category.service.js";
 import { priceCatalogProducts, saveCatalogDiscount } from "../services/catalog-discount.service.js";
 import {
   createCatalogProduct,
@@ -26,14 +42,107 @@ export const commercePublicRouter = Router();
 
 catalogRouter.get("/products", async (request, response) => {
   const owner = getOwner(request);
+  const now = new Date();
   const products = await CatalogProduct.find({ businessId: owner.businessId })
     .sort({ isActive: -1, name: 1 })
     .lean();
   response.set("Cache-Control", "no-store");
   response.json({
-    items: await priceCatalogProducts(owner.businessId, products),
+    items: (await priceCatalogProducts(owner.businessId, products)).map((product) => ({
+      ...product,
+      ...availabilityInfo(product, now),
+    })),
+    serverTime: now.toISOString(),
+    timezone:
+      (await Business.findById(owner.businessId).select("timezone").lean())?.timezone ??
+      "Asia/Manila",
+  });
+});
+
+catalogRouter.get("/categories", async (request, response) => {
+  const items = await catalogCategories(getOwner(request).businessId);
+  const source = request.query.sourceType;
+  const search = String(request.query.search ?? "")
+    .trim()
+    .toLowerCase();
+  const filtered = items.filter(
+    (item) => (!source || item.sourceType === source) && item.name.toLowerCase().includes(search),
+  );
+  const offset = Math.max(0, Number(request.query.offset) || 0);
+  const limit = Math.min(200, Math.max(1, Number(request.query.limit) || 100));
+  response.json({
+    items: filtered.slice(offset, offset + limit),
+    total: filtered.length,
+    offset,
+    limit,
     serverTime: new Date().toISOString(),
   });
+});
+catalogRouter.post("/availability-preview", async (request, response) => {
+  const rule = v.parse(availabilityScheduleSchema, request.body.availabilitySchedule);
+  const now = new Date();
+  const start = String(request.body.start ?? localDateAt(now, rule.timezone));
+  const count = Math.min(366, Math.max(1, Number(request.body.days) || 42));
+  if (!validLocalDate(start)) throw new HttpError(422, "Choose a valid preview date");
+  response.json({
+    ...availabilityInfo({ isActive: true, availabilitySchedule: rule }, now),
+    dates: Array.from({ length: count }, (_, i) => shiftDate(start, i)).filter((day) =>
+      scheduleMatchesDate(rule, day),
+    ),
+    serverTime: now.toISOString(),
+  });
+});
+catalogRouter.patch("/products/:id/availability", async (request, response) => {
+  const owner = getOwner(request);
+  if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(400, "Invalid product id");
+  const input = v.parse(
+    v.strictObject({
+      isActive: v.boolean(),
+      availabilitySchedule: availabilityScheduleSchema,
+      expectedRevision: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    }),
+    request.body,
+  );
+  const updated = await inTransaction(async () => {
+    const before = await CatalogProduct.findOne({
+      _id: request.params.id,
+      businessId: owner.businessId,
+    }).lean();
+    if (!before) throw new HttpError(404, "Product was not found");
+    const product = await CatalogProduct.findOneAndUpdate(
+      {
+        _id: before._id,
+        businessId: owner.businessId,
+        ...(input.expectedRevision === 1
+          ? { $or: [{ revision: 1 }, { revision: { $exists: false } }] }
+          : { revision: input.expectedRevision }),
+      },
+      {
+        $set: { isActive: input.isActive, availabilitySchedule: input.availabilitySchedule },
+        $inc: { revision: 1 },
+      },
+      { new: true, runValidators: true },
+    ).lean();
+    if (!product)
+      throw new HttpError(
+        409,
+        "Availability changed in another editor. Reload before saving.",
+        undefined,
+        "PRODUCT_REVISION_CONFLICT",
+      );
+    await AuditLog.create({
+      businessId: owner.businessId,
+      userId: owner.userId,
+      action: "UPDATE",
+      targetCollection: "catalog-products",
+      targetDocumentId: before._id,
+      changedFields: ["isActive", "availabilitySchedule"],
+      before: { isActive: before.isActive, availabilitySchedule: before.availabilitySchedule },
+      after: { isActive: product.isActive, availabilitySchedule: product.availabilitySchedule },
+    });
+    return product;
+  });
+  response.json({ ...updated, ...availabilityInfo(updated) });
 });
 
 catalogRouter.get("/discounts", async (request, response) => {
@@ -119,13 +228,38 @@ catalogRouter.put("/products/:id", async (request, response) => {
   if (reservedOrder)
     throw new HttpError(409, "Process or cancel confirmed orders before editing this product");
   const input = normalizeProductInput(v.parse(catalogProductSchema, request.body));
+  const expectedRevision =
+    request.body.expectedRevision === undefined
+      ? undefined
+      : v.parse(v.pipe(v.number(), v.integer(), v.minValue(1)), request.body.expectedRevision);
+  const category = await resolveCategory(owner.businessId, "PRODUCT", input.category);
   await assertImageReferences(input, owner.businessId);
   const product = await CatalogProduct.findOneAndUpdate(
-    { _id: request.params.id, businessId: owner.businessId },
-    { $set: input },
+    {
+      _id: request.params.id,
+      businessId: owner.businessId,
+      ...(expectedRevision === undefined
+        ? {}
+        : expectedRevision === 1
+          ? { $or: [{ revision: 1 }, { revision: { $exists: false } }] }
+          : { revision: expectedRevision }),
+    },
+    { $set: { ...input, categoryId: category?._id }, $inc: { revision: 1 } },
     { new: true, runValidators: true },
   );
-  if (!product) throw new HttpError(404, "Product was not found");
+  if (!product) {
+    if (
+      expectedRevision !== undefined &&
+      (await CatalogProduct.exists({ _id: request.params.id, businessId: owner.businessId }))
+    )
+      throw new HttpError(
+        409,
+        "Product changed; reload before saving",
+        undefined,
+        "PRODUCT_REVISION_CONFLICT",
+      );
+    throw new HttpError(404, "Product was not found");
+  }
   response.json(product);
 });
 
@@ -134,7 +268,7 @@ catalogRouter.delete("/products/:id", async (request, response) => {
   if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(400, "Invalid product id");
   const product = await CatalogProduct.findOneAndUpdate(
     { _id: request.params.id, businessId: owner.businessId },
-    { $set: { isActive: false, isOrderable: false } },
+    { $set: { isActive: false, isOrderable: false }, $inc: { revision: 1 } },
     { new: true },
   );
   if (!product) throw new HttpError(404, "Product was not found");

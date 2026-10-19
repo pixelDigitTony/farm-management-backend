@@ -18,6 +18,7 @@
     "images:fixtures": "node scripts/generate-image-fixtures.mjs",
     "images:benchmark": "node scripts/benchmark-image-engines.mjs",
     "typecheck:tests": "tsc -p tsconfig.test.json",
+    "migrate:landing-catalog": "tsx scripts/migrate-landing-catalog.ts",
     "test:serve": "NODE_ENV=test EMAIL_PROVIDER=console JWT_SECRET=isolated-test-secret-not-for-production tsx tests/support/server.ts"
   },
   "dependencies": {

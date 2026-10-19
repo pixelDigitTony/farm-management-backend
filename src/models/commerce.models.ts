@@ -31,6 +31,9 @@ const catalogProductSchema = new Schema(
     name: { type: String, required: true, trim: true, maxlength: 120 },
     description: { type: String, default: "", trim: true, maxlength: 2_000 },
     category: { type: String, default: "", trim: true, maxlength: 80 },
+    categoryId: objectId("CatalogCategory"),
+    availabilitySchedule: { type: Schema.Types.Mixed },
+    revision: { type: Number, default: 1 },
     productType: {
       type: String,
       enum: ["CLOTHING", "FARM_PRODUCT", "MERCHANDISE", "OTHER"],

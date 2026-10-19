@@ -24,6 +24,9 @@ vi.mock("../src/middleware/auth.js", () => ({
     userId: new mongoose.Types.ObjectId(fixtures.userId),
   }),
 }));
+vi.mock("../src/services/catalog-category.service.js", () => ({
+  catalogCategories: async () => [],
+}));
 vi.mock("../src/services/commerce.service.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/services/commerce.service.js")>();
   const catalog = [
@@ -70,13 +73,17 @@ const query = (doc: any) => ({
   // biome-ignore lint/suspicious/noThenProperty: Mongoose queries are intentionally awaitable thenables; this adapter reproduces that interface.
   then: (resolve: any, reject: any) => Promise.resolve(doc).then(resolve, reject),
 });
-function matches(doc: any, filter: any) {
+function matches(doc: any, filter: any): boolean {
   return Object.entries(filter).every(([key, value]) =>
-    key === "schemaVersion" && typeof value === "object"
-      ? doc.schemaVersion !== 2
-      : key === "publishedSnapshot"
-        ? Boolean(doc.publishedSnapshot)
-        : String(doc[key]) === String(value),
+    key === "$or"
+      ? (value as any[]).some((item) => matches(doc, item))
+      : key === "schemaVersion" && typeof value === "object"
+        ? doc.schemaVersion !== 2
+        : value && typeof value === "object" && "$ne" in value
+          ? doc[key] !== value.$ne
+          : key === "publishedSnapshot"
+            ? Boolean(doc.publishedSnapshot)
+            : String(doc[key]) === String(value),
   );
 }
 beforeEach(() => {
@@ -88,10 +95,14 @@ beforeEach(() => {
     siteTitle: "Merchant",
     seoDescription: "",
     isPublished: false,
+    isLegacyDefault: true,
   });
   vi.spyOn(LandingPage, "findOne").mockImplementation(
     (filter: any) => query(matches(page, filter) ? page : null) as any,
   );
+  vi.spyOn(CatalogProduct, "find").mockReturnValue({
+    select: () => ({ lean: async () => [] }),
+  } as any);
   vi.spyOn(LandingPage.prototype, "save").mockImplementation(async function (this: any) {
     return this;
   });
@@ -116,6 +127,8 @@ beforeEach(() => {
     const doc = [...documents.values()].find((d) => matches(d, filter));
     if (!doc) return null;
     doc.set(update.$set);
+    for (const [key, value] of Object.entries(update.$inc ?? {}))
+      doc.set(key, (doc.get(key) ?? 0) + Number(value));
     for (const key of Object.keys(update.$unset ?? {})) doc.set(key, undefined);
     return doc;
   }) as any);
@@ -225,6 +238,7 @@ describe("V2 HTTP contracts with isolated model adapters (no database)", () => {
     catalog.content.catalogItemRefs = [
       { sourceType: "PRODUCT", sourceId: "507f1f77bcf86cd799439099" },
     ];
+    delete catalog.content.categoryBinding;
     await request(app).patch(`/api/landing-page/variants/${doc._id}`).send(doc).expect(422);
     expect(CatalogProduct.countDocuments).toHaveBeenCalledWith(
       expect.objectContaining({ businessId: new mongoose.Types.ObjectId(fixtures.businessId) }),

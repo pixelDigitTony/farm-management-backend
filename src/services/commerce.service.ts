@@ -5,6 +5,7 @@ import { assertImageReferences } from "../images/references.js";
 import { catalogPrice } from "../lib/catalog-pricing.js";
 import { decimal, moneyString } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
+import { alwaysAvailable, availabilityInfo, effectiveActive } from "../lib/product-availability.js";
 import { inTransaction } from "../lib/transaction.js";
 import { Business, CatalogProduct, CustomerOrder, LandingPage, MenuItem } from "../models/index.js";
 import type { CatalogProductInput, PublicOrderInput } from "../validation/commerce.js";
@@ -12,6 +13,7 @@ import {
   defaultLandingPageCommerceSettings,
   landingPageCommerceSettingsSchema,
 } from "../validation/landing-page.js";
+import { catalogCategories, resolveCategory } from "./catalog-category.service.js";
 import { enabledDiscounts, priceCatalogProducts } from "./catalog-discount.service.js";
 
 export type CatalogItemReference = { sourceType: "MENU_ITEM" | "PRODUCT"; sourceId: string };
@@ -20,8 +22,8 @@ export function catalogItemKey(reference: CatalogItemReference) {
   return `${reference.sourceType}:${reference.sourceId}`;
 }
 
-function productAvailable(product: any) {
-  if (!product.isActive || !product.isOrderable) return false;
+function productAvailable(product: any, now = new Date()) {
+  if (!effectiveActive(product, now) || !product.isOrderable) return false;
   if (product.variants?.length)
     return product.variants.some(
       (variant: any) =>
@@ -45,6 +47,7 @@ function publicMenuItem(item: any) {
     name: item.name,
     description: "",
     category: item.category ?? "Food",
+    categoryId: item.categoryId ? String(item.categoryId) : undefined,
     productType: "FOOD" as const,
     mediaUrls,
     price: item.sellingPricePerServing,
@@ -54,7 +57,7 @@ function publicMenuItem(item: any) {
   };
 }
 
-function publicProduct(product: any) {
+function publicProduct(product: any, now = new Date()) {
   const sourceId = String(product._id);
   return {
     key: catalogItemKey({ sourceType: "PRODUCT", sourceId }),
@@ -63,6 +66,8 @@ function publicProduct(product: any) {
     name: product.name,
     description: product.description ?? "",
     category: product.category ?? "",
+    categoryId: product.categoryId ? String(product.categoryId) : undefined,
+    ...availabilityInfo(product, now),
     productType: product.productType,
     mediaUrls: product.mediaUrls ?? [],
     price: product.price ?? product.basePrice,
@@ -81,28 +86,37 @@ function publicProduct(product: any) {
         (variant.availableQuantity === null || Number(variant.availableQuantity) > 0),
     })),
     isFeatured: product.isFeatured === true,
-    isAvailable: productAvailable(product),
+    isAvailable: productAvailable(product, now),
   };
 }
 
 export async function getLandingMenuItems(businessId: Types.ObjectId) {
   return MenuItem.find({ businessId, isActive: true, showOnLandingPage: { $ne: false } })
     .select(
-      "name category mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing isAvailable",
+      "name category categoryId mediaUrls googleDriveUrl googleDriveUrls sellingPricePerServing isAvailable",
     )
     .sort({ name: 1 })
     .lean();
 }
 
-export async function getBuilderCatalogItems(businessId: Types.ObjectId) {
+export async function getBuilderCatalogItems(
+  businessId: Types.ObjectId,
+  now = new Date(),
+  includeScheduled = false,
+) {
   const [menus, products] = await Promise.all([
     getLandingMenuItems(businessId),
-    CatalogProduct.find({ businessId, isActive: true }).sort({ name: 1 }).lean(),
+    CatalogProduct.find({ businessId, ...(includeScheduled ? {} : { isActive: true }) })
+      .sort({ name: 1 })
+      .lean(),
   ]);
   const pricedProducts = await priceCatalogProducts(businessId, products);
-  return [...menus.map(publicMenuItem), ...pricedProducts.map(publicProduct)].sort((left, right) =>
-    left.name.localeCompare(right.name),
-  );
+  return [
+    ...menus.map(publicMenuItem),
+    ...pricedProducts
+      .filter((p) => includeScheduled || effectiveActive(p, now))
+      .map((p) => publicProduct(p, now)),
+  ].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function normalizeProductInput(input: CatalogProductInput) {
@@ -117,9 +131,13 @@ export function normalizeProductInput(input: CatalogProductInput) {
 
 export async function createCatalogProduct(businessId: Types.ObjectId, input: CatalogProductInput) {
   await assertImageReferences(input, businessId);
+  const category = await resolveCategory(businessId, "PRODUCT", input.category);
+  const business = await Business.findById(businessId).select("timezone").lean();
   return CatalogProduct.create({
     ...normalizeProductInput(input),
     businessId,
+    categoryId: category?._id,
+    availabilitySchedule: input.availabilitySchedule ?? alwaysAvailable(business?.timezone),
     productCode: `PRD-${Date.now()}-${Math.floor(Math.random() * 10_000)}`,
   });
 }
@@ -142,9 +160,19 @@ export function hasEnabledCatalog(snapshot: any, type: "CATALOG" | "MENU" = "CAT
   );
 }
 
-export async function getPublishedCatalogItems(businessId: Types.ObjectId, snapshot: any) {
+export async function getPublishedCatalogItems(
+  businessId: Types.ObjectId,
+  snapshot: any,
+  now = new Date(),
+) {
+  if (
+    publishedSections(snapshot).some((s: any) =>
+      s.components?.some((c: any) => c.content?.categoryBinding),
+    )
+  )
+    await catalogCategories(businessId, now);
   if (hasEnabledCatalog(snapshot))
-    return filterPublishedCatalogItems(snapshot, await getBuilderCatalogItems(businessId));
+    return filterPublishedCatalogItems(snapshot, await getBuilderCatalogItems(businessId, now));
   if (hasEnabledCatalog(snapshot, "MENU")) {
     const menus = await getLandingMenuItems(businessId);
     return filterPublishedCatalogItems(snapshot, menus.map(publicMenuItem));
@@ -154,11 +182,16 @@ export async function getPublishedCatalogItems(businessId: Types.ObjectId, snaps
 
 // V2 orders are limited to items exposed by enabled published catalog/menu blocks.
 // Legacy pages retain their existing whole-collection behavior.
-export function filterPublishedCatalogItems<T extends { sourceType: string; sourceId: string }>(
-  snapshot: any,
-  items: T[],
-): T[] {
-  if (snapshot.schemaVersion !== 2) return items;
+export function filterPublishedCatalogItems<
+  T extends { sourceType: string; sourceId: string; categoryId?: string },
+>(snapshot: any, items: T[]): T[] {
+  if (
+    snapshot.schemaVersion !== 2 &&
+    !publishedSections(snapshot).some((s: any) =>
+      s.components?.some((c: any) => c.content?.categoryBinding),
+    )
+  )
+    return items;
   const blocks = publishedSections(snapshot)
     .filter((s: any) => s.enabled !== false)
     .flatMap((s: any) =>
@@ -170,22 +203,28 @@ export function filterPublishedCatalogItems<T extends { sourceType: string; sour
     );
   return items.filter((item) =>
     blocks.some((block: any) =>
-      block.type === "CATALOG"
-        ? !block.content.catalogItemRefs?.length ||
-          block.content.catalogItemRefs.some(
-            (r: any) => r.sourceType === item.sourceType && r.sourceId === item.sourceId,
-          )
-        : item.sourceType === "MENU_ITEM" &&
-          (!block.content.menuItemIds?.length || block.content.menuItemIds.includes(item.sourceId)),
+      block.content.categoryBinding
+        ? (block.type === "CATALOG" || item.sourceType === "MENU_ITEM") &&
+          (block.content.categoryBinding.mode === "ALL_CATEGORIES" ||
+            block.content.categoryBinding.categoryIds.includes(String(item.categoryId)))
+        : block.type === "CATALOG"
+          ? !block.content.catalogItemRefs?.length ||
+            block.content.catalogItemRefs.some(
+              (r: any) => r.sourceType === item.sourceType && r.sourceId === item.sourceId,
+            )
+          : item.sourceType === "MENU_ITEM" &&
+            (!block.content.menuItemIds?.length ||
+              block.content.menuItemIds.includes(item.sourceId)),
     ),
   );
 }
 
-async function publishedOrderingContext(slug: string) {
+async function publishedOrderingContext(slug: string, now: Date) {
   const page = await LandingPage.findOne({
     slug: slug.toLowerCase(),
     isPublished: true,
     publishedSnapshot: { $ne: null },
+    isArchived: { $ne: true },
   }).lean();
   if (!page) throw new HttpError(404, "Published page was not found");
   const business = await Business.exists({ _id: page.businessId, isArchived: { $ne: true } });
@@ -195,10 +234,11 @@ async function publishedOrderingContext(slug: string) {
     landingPageCommerceSettingsSchema,
     snapshot.commerce ?? defaultLandingPageCommerceSettings,
   );
-  const items = await getPublishedCatalogItems(page.businessId, snapshot);
+  const items = await getPublishedCatalogItems(page.businessId, snapshot, now);
   return {
     page,
     commerce,
+    snapshot,
     allowedReferences: items.map(({ sourceType, sourceId }) => ({ sourceType, sourceId })),
   };
 }
@@ -220,9 +260,14 @@ function firstMedia(item: any) {
 }
 
 export async function createPublicOrder(slug: string, input: PublicOrderInput) {
-  const { page, commerce, allowedReferences } = await publishedOrderingContext(slug);
+  const eligibilityTime = new Date();
+  const { page, commerce, snapshot, allowedReferences } = await publishedOrderingContext(
+    slug,
+    eligibilityTime,
+  );
   const existing = await CustomerOrder.findOne({
     businessId: page.businessId,
+    landingPageId: page._id,
     idempotencyKey: input.idempotencyKey,
   });
   if (existing) return { order: existing, created: false };
@@ -236,8 +281,32 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
   const lines = normalizedLines(input.items);
   for (const line of lines) {
     if (!mongoose.isValidObjectId(line.sourceId)) throw new HttpError(422, "Select valid products");
-    if (!allowed.has(catalogItemKey(line)))
+    if (!allowed.has(catalogItemKey(line))) {
+      if (line.sourceType === "PRODUCT") {
+        const exposed = filterPublishedCatalogItems(
+          snapshot,
+          await getBuilderCatalogItems(page.businessId, eligibilityTime, true),
+        );
+        if (
+          !exposed.some(
+            (item) => item.sourceType === line.sourceType && item.sourceId === line.sourceId,
+          )
+        )
+          throw new HttpError(422, "One or more products are not available from this page");
+        const product = await CatalogProduct.findOne({
+          _id: line.sourceId,
+          businessId: page.businessId,
+        }).lean();
+        if (product && !effectiveActive(product, eligibilityTime))
+          throw new HttpError(
+            409,
+            "A product is not active right now. Remove it or return during its active dates.",
+            { sourceId: line.sourceId, ...availabilityInfo(product, eligibilityTime) },
+            "PRODUCT_NOT_ACTIVE_NOW",
+          );
+      }
       throw new HttpError(422, "One or more products are not available from this page");
+    }
   }
 
   const menuIds = lines
@@ -262,7 +331,7 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
   ]);
 
   const discounts = await enabledDiscounts(page.businessId, productIds);
-  const pricingTime = new Date();
+  const pricingTime = eligibilityTime;
   const orderItems = lines.map((line) => {
     if (line.sourceType === "MENU_ITEM") {
       const menu = menus.find((candidate) => candidate.id === line.sourceId);
@@ -284,7 +353,14 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
     }
 
     const product = products.find((candidate) => candidate.id === line.sourceId);
-    if (!product || !productAvailable(product))
+    if (product && !effectiveActive(product, eligibilityTime))
+      throw new HttpError(
+        409,
+        "A product is not active right now",
+        { sourceId: line.sourceId, ...availabilityInfo(product, eligibilityTime) },
+        "PRODUCT_NOT_ACTIVE_NOW",
+      );
+    if (!product || !productAvailable(product, eligibilityTime))
       throw new HttpError(422, "One or more products are unavailable");
     const variants = product.variants ?? [];
     const variant = line.variantId
@@ -388,6 +464,13 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
         businessId: page.businessId,
         idempotencyKey: input.idempotencyKey,
       });
+      if (duplicate && String(duplicate.landingPageId) !== String(page._id))
+        throw new HttpError(
+          409,
+          "This order request belongs to another page",
+          undefined,
+          "IDEMPOTENCY_CONFLICT",
+        );
       if (duplicate) return { order: duplicate, created: false };
     }
     throw error;

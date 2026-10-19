@@ -209,6 +209,18 @@ const textComponent = v.object({
   }),
 });
 
+export const categoryBindingSchema = v.variant("mode", [
+  v.strictObject({ mode: v.literal("ALL_CATEGORIES") }),
+  v.strictObject({
+    mode: v.literal("SELECTED_CATEGORIES"),
+    categoryIds: v.pipe(
+      v.array(v.pipe(v.string(), v.regex(/^[a-f0-9]{24}$/i))),
+      v.maxLength(1000),
+      v.check((ids) => new Set(ids).size === ids.length, "Choose each category once"),
+    ),
+  }),
+]);
+
 const menuComponent = v.object({
   ...v2Base,
   id: componentId,
@@ -220,6 +232,7 @@ const menuComponent = v.object({
     heading: requiredText(120),
     body: shortText(500),
     menuItemIds: v.pipe(v.array(v.string()), v.maxLength(12)),
+    categoryBinding: v.optional(categoryBindingSchema),
     displayMode,
     columns: v.optional(v.picklist([2, 3, 4]), 3),
   }),
@@ -249,6 +262,7 @@ const catalogComponent = v.object({
         "Select each catalog item once",
       ),
     ),
+    categoryBinding: v.optional(categoryBindingSchema),
     displayMode: v.optional(v.picklist(["VERTICAL", "HORIZONTAL"]), "HORIZONTAL"),
     columns: v.optional(v.picklist([2, 3, 4]), 3),
   }),
@@ -622,6 +636,7 @@ export const landingPageVariantCreateSchema = v.pipe(
 
 export const landingPageVariantUpdateSchema = v.pipe(
   v.object({
+    categoryBindingVersion: v.optional(v.literal(1)),
     schemaVersion: v.optional(v.picklist([1, 2])),
     template: v.optional(
       v.object({
