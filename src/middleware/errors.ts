@@ -22,6 +22,13 @@ export function errorHandler(
     return response.status(422).json({ message: "Validation failed", issues: error.issues });
   }
   if (error instanceof HttpError) {
+    if (
+      error.status === 429 &&
+      error.details &&
+      typeof error.details === "object" &&
+      "retryAfterSeconds" in error.details
+    )
+      response.set("Retry-After", String(error.details.retryAfterSeconds));
     return response
       .status(error.status)
       .json({ message: error.message, code: error.code, details: error.details });

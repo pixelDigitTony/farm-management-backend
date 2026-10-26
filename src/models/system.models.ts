@@ -49,6 +49,10 @@ const userSchema = new Schema(
       mpinChangedAt: { type: Date, default: null },
     },
     lastLoginAt: Date,
+    verificationIssueLeaseUntil: { type: Date, default: null, select: false },
+    verificationRequestKey: { type: String, default: null, select: false },
+    verificationNotificationPending: { type: Boolean, default: false, select: false },
+    employeeCreationKey: { type: String, select: false },
     lastLoginMethod: {
       type: String,
       enum: ["EMAIL_PASSWORD", "PHONE_MPIN"],
@@ -64,6 +68,10 @@ userSchema.index(
   { unique: true, partialFilterExpression: { role: 99 }, name: "one_super_admin" },
 );
 userSchema.index({ businessId: 1, status: 1 });
+userSchema.index(
+  { businessId: 1, employeeCreationKey: 1 },
+  { unique: true, partialFilterExpression: { employeeCreationKey: { $type: "string" } } },
+);
 
 const emailVerificationTokenSchema = new Schema(
   {
@@ -83,7 +91,7 @@ const emailVerificationTokenSchema = new Schema(
       provider: { type: String, enum: ["RESEND", "CONSOLE", "CLOUDFLARE"], required: true },
       status: {
         type: String,
-        enum: ["PENDING", "SENT", "QUEUED", "DELIVERED", "FAILED", "BOUNCED"],
+        enum: ["PENDING", "SENT", "QUEUED", "DELIVERED", "FAILED", "BOUNCED", "DEVELOPMENT"],
         default: "PENDING",
       },
       messageId: { type: String, default: null },
@@ -149,6 +157,7 @@ const businessSchema = new Schema(
     currency: { type: String, enum: ["PHP"], default: "PHP" },
     timezone: { type: String, default: "Asia/Manila" },
     landingCatalogMigrationVersion: { type: Number, default: 0 },
+    orderEmailRecipientUserId: objectId("User"),
     piggery: {
       name: { type: String, default: "Miss V Piggery" },
       address: String,

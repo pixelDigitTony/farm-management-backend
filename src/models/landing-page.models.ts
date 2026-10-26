@@ -13,6 +13,7 @@ const landingPageSchema = new Schema(
     creationKey: { type: String },
     creationFingerprint: { type: String },
     publishedSourceVariantRevision: { type: Number },
+    analyticsStartsAt: { type: Date, default: null },
     slug: { type: String, required: true, trim: true, lowercase: true },
     siteTitle: { type: String, required: true, trim: true },
     seoDescription: { type: String, default: "", trim: true },

@@ -104,9 +104,9 @@ Do not commit a populated `.env` file or real credentials.
 
 ## Email verification
 
-Local development uses `EMAIL_PROVIDER=console`. The API prints the verification URL to its terminal and includes it in the non-production registration result.
+Local development uses `EMAIL_PROVIDER=console`. No email is sent, and delivery is labeled DEVELOPMENT. Non-production registration results can include a development verification link; tokens are not logged.
 
-Production email uses Resend. Set `EMAIL_PROVIDER=resend` and configure the API key and sender address on a verified Resend domain. If either required value is missing, the server falls back to console email and prints a warning instead of failing startup.
+Production email uses Resend and fails startup when required configuration is missing. Verification mail uses an encrypted durable outbox and the normal backend process runs its worker. See [Resend and environment setup](docs/email-setup.md) for sending/receiving domains, the webhook endpoint, secrets, order inbox activation, and mailbox acceptance tests.
 
 ## Owner authentication
 

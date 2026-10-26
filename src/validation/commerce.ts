@@ -103,6 +103,7 @@ export const publicOrderSchema = v.pipe(
     items: v.pipe(v.array(orderLineSchema), v.minLength(1), v.maxLength(30)),
     customerNotes: optionalText(1_000),
     expectedTotal: v.optional(nonNegativeNumber),
+    analyticsSessionId: v.optional(v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{16,100}$/))),
   }),
   v.check(
     (order) => order.fulfillmentMethod !== "DELIVERY" || order.deliveryAddress.length >= 5,

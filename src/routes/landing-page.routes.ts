@@ -1,6 +1,7 @@
 import { type Request, type RequestHandler, Router } from "express";
 import mongoose from "mongoose";
 import * as v from "valibot";
+import { env } from "../config/env.js";
 import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
 import { availabilityInfo } from "../lib/product-availability.js";
@@ -662,6 +663,7 @@ landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) =>
     siteTitle: snapshot.siteTitle,
     seoDescription: snapshot.seoDescription,
     publishedAt: page.publishedAt,
+    analyticsEnabled: env.LANDING_ANALYTICS_ENABLED === "true",
     variant: {
       schemaVersion: snapshot.schemaVersion ?? 1,
       template: snapshot.template,

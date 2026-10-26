@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import mongoose, { type Types } from "mongoose";
 import * as v from "valibot";
+import { env } from "../config/env.js";
 import { assertImageReferences } from "../images/references.js";
 import { catalogPrice } from "../lib/catalog-pricing.js";
 import { decimal, moneyString } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
 import { alwaysAvailable, availabilityInfo, effectiveActive } from "../lib/product-availability.js";
 import { inTransaction } from "../lib/transaction.js";
+import { LandingVisit } from "../models/analytics.models.js";
 import { Business, CatalogProduct, CustomerOrder, LandingPage, MenuItem } from "../models/index.js";
 import type { CatalogProductInput, PublicOrderInput } from "../validation/commerce.js";
 import {
@@ -439,12 +441,22 @@ export async function createPublicOrder(slug: string, input: PublicOrderInput) {
   if (subtotal.lessThan(commerce.minimumOrder))
     throw new HttpError(422, `Minimum order is ${moneyString(decimal(commerce.minimumOrder))}`);
   try {
+    const visit = input.analyticsSessionId
+      ? await LandingVisit.findOne({
+          businessId: page.businessId,
+          landingPageId: page._id,
+          sessionId: input.analyticsSessionId,
+          lastSeenAt: { $gte: new Date(Date.now() - 1800000) },
+        }).lean()
+      : null;
     const order = await CustomerOrder.create({
       businessId: page.businessId,
       landingPageId: page._id,
       orderNumber: `WEB-${Date.now()}-${Math.floor(Math.random() * 10_000)}`,
       idempotencyKey: input.idempotencyKey,
       sourceSlugSnapshot: page.slug,
+      analyticsSessionId: visit?.sessionId ?? null,
+      emailNotificationPending: env.ORDER_EMAIL_INBOX_ENABLED === "true",
       customer: input.customer,
       fulfillmentMethod: input.fulfillmentMethod,
       deliveryAddress: input.deliveryAddress,

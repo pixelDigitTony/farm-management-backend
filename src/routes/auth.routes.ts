@@ -177,15 +177,52 @@ authRouter.post("/verify-email", verificationLimiter, async (request, response) 
     owner.pendingEmail = null;
     owner.pendingEmailNormalized = null;
   }
-  owner.emailVerifiedAt = now;
-  if (Number(owner.role) === 99) {
-    owner.isApproved = true;
-    owner.approvedAt = now;
-    owner.status = "ACTIVE";
-  } else {
-    owner.status = owner.isApproved ? "ACTIVE" : "PENDING_ADMIN_APPROVAL";
-  }
-  await owner.save();
+  const verified = await User.updateOne(
+    {
+      _id: owner._id,
+      ...(verifiesPendingEmail
+        ? { pendingEmailNormalized: tokenRecord.emailNormalized }
+        : { emailNormalized: tokenRecord.emailNormalized }),
+    },
+    [
+      {
+        $set: {
+          emailVerifiedAt: now,
+          ...(verifiesPendingEmail
+            ? {
+                email: { $literal: owner.email },
+                emailNormalized: { $literal: owner.emailNormalized },
+                pendingEmail: null,
+                pendingEmailNormalized: null,
+              }
+            : {}),
+          status: {
+            $cond: [
+              {
+                $or: [{ $eq: ["$isActive", false] }, { $in: ["$status", ["DISABLED", "LOCKED"]] }],
+              },
+              "$status",
+              {
+                $cond: [
+                  { $or: ["$isApproved", { $eq: ["$role", 99] }] },
+                  "ACTIVE",
+                  "PENDING_ADMIN_APPROVAL",
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ],
+    { updatePipeline: true },
+  );
+  if (!verified.matchedCount)
+    throw new HttpError(
+      400,
+      "This verification link is invalid or expired",
+      undefined,
+      "INVALID_VERIFICATION_TOKEN",
+    );
   await Promise.all([
     EmailVerificationToken.updateMany(
       { userId: owner._id, purpose: "VERIFY_EMAIL", usedAt: null, invalidatedAt: null },

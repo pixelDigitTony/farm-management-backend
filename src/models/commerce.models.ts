@@ -124,6 +124,9 @@ const customerOrderSchema = new Schema(
     orderNumber: { type: String, required: true },
     idempotencyKey: { type: String, required: true },
     sourceSlugSnapshot: { type: String, required: true },
+    analyticsSessionId: { type: String, default: null },
+    emailNotificationPending: { type: Boolean, default: false },
+    emailConversationInitialized: { type: Boolean, default: false },
     customer: {
       name: { type: String, required: true, trim: true, maxlength: 120 },
       phone: { type: String, required: true, trim: true, maxlength: 40 },

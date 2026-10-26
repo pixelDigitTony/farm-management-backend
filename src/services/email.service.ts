@@ -3,7 +3,7 @@ import { env } from "../config/env.js";
 
 export type EmailDeliveryResult = {
   provider: "RESEND" | "CONSOLE";
-  status: "SENT" | "QUEUED" | "DELIVERED" | "BOUNCED";
+  status: "SENT" | "QUEUED" | "DELIVERED" | "BOUNCED" | "DEVELOPMENT";
   messageId: string | null;
 };
 
@@ -12,6 +12,7 @@ type VerificationEmail = {
   recipientEmail: string;
   verificationUrl: string;
   expiresAt: Date;
+  businessName?: string;
 };
 
 type CredentialResetEmail = {
@@ -36,6 +37,39 @@ const escapeHtml = (value: string) =>
 
 class ResendEmailService {
   private readonly client = new Resend(env.RESEND_API_KEY);
+
+  async send(input: EmailPayload, idempotencyKey: string): Promise<EmailDeliveryResult> {
+    const { data, error } = await this.client.emails.send(
+      {
+        from: `${env.RESEND_EMAIL_FROM_NAME} <${env.RESEND_EMAIL_FROM}>`,
+        to: input.to,
+        subject: input.subject,
+        text: input.text,
+        ...(input.html ? { html: input.html } : {}),
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(input.headers ? { headers: input.headers } : {}),
+      },
+      { idempotencyKey },
+    );
+    if (error || !data?.id) {
+      const failure = new Error("Email provider rejected the message");
+      failure.name = error?.name ?? "provider_error";
+      throw failure;
+    }
+    return { provider: "RESEND", status: "SENT", messageId: data.id };
+  }
+
+  async getReceived(id: string) {
+    const { data, error } = await this.client.emails.receiving.get(id);
+    if (error || !data) throw new Error("Inbound email content is temporarily unavailable");
+    return data;
+  }
+
+  async getSent(id: string) {
+    const { data, error } = await this.client.emails.get(id);
+    if (error || !data) throw new Error("Sent email metadata is temporarily unavailable");
+    return data;
+  }
 
   async sendVerificationEmail(input: VerificationEmail): Promise<EmailDeliveryResult> {
     const { data, error } = await this.client.emails.send({
@@ -71,23 +105,30 @@ class ResendEmailService {
 }
 
 class ConsoleEmailService {
+  async send(_input: EmailPayload, _key: string): Promise<EmailDeliveryResult> {
+    return { provider: "CONSOLE", status: "DEVELOPMENT", messageId: null };
+  }
+
+  async getReceived(_id: string): Promise<Record<string, unknown>> {
+    throw new Error("Receiving email requires Resend configuration");
+  }
+
+  async getSent(_id: string): Promise<Record<string, unknown>> {
+    throw new Error("Email metadata requires Resend configuration");
+  }
   async sendVerificationEmail(input: VerificationEmail): Promise<EmailDeliveryResult> {
-    console.info(`[development email] Verify ${input.recipientEmail}: ${input.verificationUrl}`);
-    return { provider: "CONSOLE", status: "SENT", messageId: null };
+    return { provider: "CONSOLE", status: "DEVELOPMENT", messageId: null };
   }
 
   async sendCredentialResetEmail(input: CredentialResetEmail): Promise<EmailDeliveryResult> {
-    console.info(
-      `[development email] Reset ${input.credentialLabel} for ${input.recipientEmail}: ${input.resetUrl}`,
-    );
-    return { provider: "CONSOLE", status: "SENT", messageId: null };
+    return { provider: "CONSOLE", status: "DEVELOPMENT", messageId: null };
   }
 }
 
 function verificationHtml(input: VerificationEmail) {
   const name = escapeHtml(input.recipientName);
   const url = escapeHtml(input.verificationUrl);
-  return `<!doctype html><html><body style="margin:0;background:#f7f6f1;font-family:Arial,sans-serif;color:#292524"><div style="max-width:560px;margin:40px auto;background:#fff;border:1px solid #e7e5e4;border-radius:20px;padding:36px"><div style="color:#166534;font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase">Miss V Business</div><h1 style="font-size:28px;margin:16px 0 8px">Verify your email</h1><p style="color:#57534e;line-height:1.6">Hello ${name}, confirm this email address to activate your owner account.</p><a href="${url}" style="display:inline-block;margin:20px 0;padding:14px 22px;background:#183b2b;color:#fff;text-decoration:none;border-radius:12px;font-weight:700">Verify email address</a><p style="font-size:13px;color:#78716c;line-height:1.5">This link expires ${escapeHtml(input.expiresAt.toLocaleString("en-PH", { timeZone: "Asia/Manila" }))}. If you did not register, you can ignore this message.</p></div></body></html>`;
+  return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#292524"><main style="max-width:560px;margin:40px auto;padding:32px"><h1>Verify your email</h1><p>Hello ${name}, verify your email to access ${escapeHtml(input.businessName ?? "Miss V Business")}.</p><p><a href="${url}">Verify email address</a></p><p>This link expires ${escapeHtml(input.expiresAt.toLocaleString("en-PH", { timeZone: "Asia/Manila" }))}. If you did not request this account, ignore this message.</p></main></body></html>`;
 }
 
 function verificationText(input: VerificationEmail) {
@@ -107,3 +148,20 @@ function credentialResetText(input: CredentialResetEmail) {
 
 export const emailService =
   env.EMAIL_PROVIDER === "resend" ? new ResendEmailService() : new ConsoleEmailService();
+
+export type EmailPayload = {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  replyTo?: string;
+  headers?: Record<string, string>;
+};
+export function verificationPayload(input: VerificationEmail): EmailPayload {
+  return {
+    to: input.recipientEmail,
+    subject: "Verify your email",
+    text: verificationText(input),
+    html: verificationHtml(input),
+  };
+}

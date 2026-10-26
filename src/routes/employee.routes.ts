@@ -9,7 +9,11 @@ import { HttpError } from "../lib/http-error.js";
 import { allPermissions } from "../lib/permissions.js";
 import { getOwner } from "../middleware/auth.js";
 import { AuditLog, Business, RegistrationInvite, User } from "../models/index.js";
-import { issueVerificationEmail } from "../services/email-verification.service.js";
+import {
+  employeeDto,
+  issueVerificationEmail,
+  verificationSummaries,
+} from "../services/email-verification.service.js";
 import { registrationSchema } from "../validation/auth.js";
 
 const roleLevel = v.pipe(
@@ -91,7 +95,12 @@ employeeRouter.get("/", async (request, response) => {
     Business.findById(owner.businessId).select("businessName roles ownerRole").lean(),
     RegistrationInvite.find({ businessId: owner.businessId }).sort({ createdAt: -1 }).lean(),
   ]);
-  response.json({ users, business, invites });
+  const deliveries = await verificationSummaries(users.map((user) => user._id));
+  response.json({
+    users: users.map((user) => employeeDto(user, deliveries.get(String(user._id)))),
+    business,
+    invites,
+  });
 });
 
 async function changeRole(
@@ -211,12 +220,29 @@ employeeRouter.delete("/roles/:level", async (request, response) => {
 employeeRouter.post("/accounts", async (request, response) => {
   const owner = getOwner(request);
   const input = v.parse(accountSchema, request.body);
+  const key = request.get("Idempotency-Key");
+  if (key && !/^[A-Za-z0-9_-]{16,100}$/.test(key))
+    throw new HttpError(422, "Invalid account request key");
+  if (key) {
+    const existing = await User.findOne({ businessId: owner.businessId, employeeCreationKey: key });
+    if (existing) {
+      if (existing.email !== normalizeEmail(input.email))
+        throw new HttpError(409, "This request key belongs to another account");
+      const summaries = await verificationSummaries([existing._id]);
+      return response.status(201).json({
+        user: employeeDto(existing),
+        emailDelivery: summaries.get(existing.id) ?? { status: "FAILED" },
+      });
+    }
+  }
   const business = await Business.findById(owner.businessId).select("roles ownerRole");
   if (!business?.roles.some((role: { level: number }) => role.level === input.role))
     throw new HttpError(422, "Select an existing business role");
   const normalized = await normalizedIdentity(input.email, input.phone);
   const user = await User.create({
     businessId: owner.businessId,
+    employeeCreationKey: key,
+    verificationNotificationPending: true,
     name: input.name,
     email: normalized.emailNormalized,
     emailNormalized: normalized.emailNormalized,
@@ -230,8 +256,25 @@ employeeRouter.post("/accounts", async (request, response) => {
     approvedBy: owner.userId,
     status: "PENDING_EMAIL_VERIFICATION",
   });
-  const emailDelivery = await issueVerificationEmail(user, { enforceRateLimit: false });
-  response.status(201).json({ user, emailDelivery });
+  const emailDelivery = await issueVerificationEmail(user, { enforceRateLimit: false }).catch(
+    () => ({ status: "FAILED" }),
+  );
+  response.status(201).json({ user: employeeDto(user, emailDelivery), emailDelivery });
+});
+
+employeeRouter.post("/accounts/:id/resend-verification", async (request, response) => {
+  const owner = getOwner(request);
+  if (!mongoose.isValidObjectId(request.params.id))
+    throw new HttpError(404, "Employee was not found");
+  const user = await User.findOne({ _id: request.params.id, businessId: owner.businessId }).select(
+    "+emailNormalized",
+  );
+  if (!user) throw new HttpError(404, "Employee was not found");
+  if (user.emailVerifiedAt) throw new HttpError(409, "This email is already verified");
+  if (!user.isActive || ["DISABLED", "LOCKED"].includes(user.status))
+    throw new HttpError(409, "This account cannot receive verification emails");
+  const emailDelivery = await issueVerificationEmail(user);
+  response.status(202).json({ userId: user.id, verificationStatus: user.status, emailDelivery });
 });
 
 employeeRouter.patch("/accounts/:id", async (request, response) => {
@@ -330,6 +373,7 @@ invitePublicRouter.post("/:tokenId/register", async (request, response) => {
   const user = await User.create({
     businessId: invite.businessId,
     name: input.ownerName,
+    verificationNotificationPending: true,
     email: normalized.emailNormalized,
     emailNormalized: normalized.emailNormalized,
     phone: input.phone.trim(),
@@ -356,7 +400,9 @@ invitePublicRouter.post("/:tokenId/register", async (request, response) => {
       userAgent: request.get("user-agent"),
     }),
   ]);
-  const emailDelivery = await issueVerificationEmail(user, { enforceRateLimit: false });
+  const emailDelivery = await issueVerificationEmail(user, { enforceRateLimit: false }).catch(
+    () => ({ status: "FAILED" }),
+  );
   response
     .status(201)
     .json({ message: "Registration completed. Verify your email to sign in.", emailDelivery });

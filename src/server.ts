@@ -2,6 +2,7 @@ import { app } from "./app.js";
 import { connectDatabase, disconnectDatabase } from "./config/database.js";
 import { env, resendEmailFallbackActive } from "./config/env.js";
 import { startImageProcessing, stopImageProcessing } from "./images/service.js";
+import { startEmailWorker } from "./services/email-worker.service.js";
 
 async function start() {
   if (resendEmailFallbackActive) {
@@ -11,6 +12,7 @@ async function start() {
   }
   await connectDatabase();
   await startImageProcessing();
+  const stopEmailWorker = startEmailWorker();
   const server = app.listen(env.PORT, () =>
     console.log(`Miss V Business API running on http://localhost:${env.PORT}`),
   );
@@ -22,7 +24,7 @@ async function start() {
     deadline.unref();
     const processing = stopImageProcessing();
     const closed = new Promise<void>((resolve) => server.close(() => resolve()));
-    await Promise.all([processing, closed]);
+    await Promise.all([processing, closed, stopEmailWorker()]);
     await disconnectDatabase();
     clearTimeout(deadline);
     process.exit(0);

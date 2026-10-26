@@ -2,7 +2,7 @@ export const permissionModules = [
   { id: "overview", name: "Overview", actions: ["view"] },
   { id: "cash-flow", name: "Cash flow", actions: ["view", "create", "edit", "delete"] },
   { id: "calendar", name: "Calendar & To-do", actions: ["view", "create", "edit", "delete"] },
-  { id: "landing-page", name: "Landing Page", actions: ["view", "create", "edit", "delete"] },
+  { id: "landing-page", name: "Landing Management", actions: ["view", "create", "edit", "delete"] },
   { id: "catalog", name: "Product Catalog", actions: ["view", "create", "edit", "delete"] },
   { id: "orders", name: "Customer Orders", actions: ["view", "edit"] },
   { id: "inventory", name: "Inventory", actions: ["view", "create", "edit", "delete"] },
@@ -111,6 +111,9 @@ export function requiredPermissions(rawPath: string, method = "GET"): string[] |
     if (area === "catalog" && method === "POST" && resource === "availability-preview")
       action = "view";
   }
+  if (area === "orders" && /\/messages(?:\/[^/]+\/retry)?$/.test(path) && method === "POST")
+    action = "edit";
+  if (area === "orders" && path.endsWith("/messages/read") && method === "PATCH") action = "view";
   return modules.map((module) => `${module}:${action}`);
 }
 export function allowsRequest(permissions: string[], path: string, method = "GET") {

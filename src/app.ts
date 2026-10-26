@@ -19,10 +19,16 @@ import { calculationRouter } from "./routes/calculation.routes.js";
 import { calendarTodoRouter } from "./routes/calendar-todo.routes.js";
 import { catalogRouter, commercePublicRouter, orderRouter } from "./routes/commerce.routes.js";
 import { dashboardRouter } from "./routes/dashboard.routes.js";
+import { emailWebhookRouter } from "./routes/email-webhook.routes.js";
 import { employeeRouter, invitePublicRouter } from "./routes/employee.routes.js";
 import { imageRouter, publicImageRouter } from "./routes/image.routes.js";
+import {
+  analyticsManagementRouter,
+  analyticsPublicRouter,
+} from "./routes/landing-analytics.routes.js";
 import { landingPagePublicRouter, landingPageRouter } from "./routes/landing-page.routes.js";
 import { operationRouter } from "./routes/operation.routes.js";
+import { orderMessagingRouter } from "./routes/order-messaging.routes.js";
 import { reportRouter } from "./routes/report.routes.js";
 import { resourceRouter } from "./routes/resource.routes.js";
 import { settingsRouter } from "./routes/settings.routes.js";
@@ -38,11 +44,21 @@ app.use(
 );
 app.use(compression());
 app.use(cookieParser());
+app.use("/api/webhooks/email", emailWebhookRouter);
 app.use(express.json({ limit: "2mb" }));
 if (env.NODE_ENV !== "test") app.use(morgan("dev"));
 
 app.get("/api/health", (_request, response) =>
-  response.json({ status: "ok", database: "MissVBusiness" }),
+  response.json({
+    status: "ok",
+    database: "MissVBusiness",
+    email: {
+      provider: env.EMAIL_PROVIDER,
+      developmentOnly: env.EMAIL_PROVIDER === "console",
+      inboxEnabled: env.ORDER_EMAIL_INBOX_ENABLED === "true",
+      receivingConfigured: Boolean(env.EMAIL_RECEIVING_DOMAIN && env.RESEND_WEBHOOK_SECRET),
+    },
+  }),
 );
 app.use("/api/auth", authLimiter, authRouter);
 app.use("/api/invites", authLimiter, invitePublicRouter);
@@ -64,6 +80,7 @@ app.use(
   publicContentLimiter,
   publicImageRouter,
   landingPagePublicRouter,
+  analyticsPublicRouter,
   commercePublicRouter,
 );
 app.use("/api", auditOwnerInteraction);
@@ -79,9 +96,23 @@ app.use(
   requirePermissions,
   calendarTodoRouter,
 );
-app.use("/api/landing-page", requireOwner, requireApproved, requirePermissions, landingPageRouter);
+app.use(
+  "/api/landing-page",
+  requireOwner,
+  requireApproved,
+  requirePermissions,
+  analyticsManagementRouter,
+  landingPageRouter,
+);
 app.use("/api/catalog", requireOwner, requireApproved, requirePermissions, catalogRouter);
-app.use("/api/orders", requireOwner, requireApproved, requirePermissions, orderRouter);
+app.use(
+  "/api/orders",
+  requireOwner,
+  requireApproved,
+  requirePermissions,
+  orderMessagingRouter,
+  orderRouter,
+);
 app.use("/api/operations", requireOwner, requireApproved, requirePermissions, operationRouter);
 app.use("/api/resources", requireOwner, requireApproved, requirePermissions, resourceRouter);
 app.use("/api/reports", requireOwner, requireApproved, requirePermissions, reportRouter);
