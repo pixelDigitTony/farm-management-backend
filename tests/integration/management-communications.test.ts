@@ -11,9 +11,11 @@ import {
   Business,
   CustomerOrder,
   EmailOutbox,
+  EmailRecoveryRun,
   EmailReplyAlias,
   EmailVerificationToken,
   EmailWebhookEvent,
+  EmailWorkerHealth,
   LandingEvent,
   LandingPage,
   LandingVisit,
@@ -31,6 +33,7 @@ import {
 import { orderMessagingRouter } from "../../src/routes/order-messaging.routes.js";
 import { emailService } from "../../src/services/email.service.js";
 import { processEmailOutbox, readEmailPayload } from "../../src/services/email-outbox.service.js";
+import { recoverEmailReplies } from "../../src/services/email-recovery.service.js";
 import { issueVerificationEmail } from "../../src/services/email-verification.service.js";
 import { processEmailWebhooks, saveWebhook } from "../../src/services/email-webhook.service.js";
 import {
@@ -463,7 +466,8 @@ describe("email order messaging", () => {
       received_for: [address],
       text: "Can I collect tomorrow?",
       message_id: "<customer@example.test>",
-      headers: { "Authentication-Results": "mx.test; dmarc=pass header.from=example.test" },
+      authentication: { dmarc: "pass", spf: "pass", dkim: "pass" },
+      headers: {},
     } as any);
     await saveWebhook("evt-customer", incoming("mail-customer", address));
     await processEmailWebhooks();
@@ -481,7 +485,8 @@ describe("email order messaging", () => {
       received_for: [staffAddress],
       text: "Yes, tomorrow is fine",
       message_id: "<staff@example.test>",
-      headers: { "Authentication-Results": "mx.test; dmarc=pass header.from=example.test" },
+      authentication: { dmarc: "pass", spf: "pass", dkim: "pass" },
+      headers: {},
     } as any);
     await saveWebhook("evt-staff", incoming("mail-staff", staffAddress, "owner@example.test"));
     await processEmailWebhooks();
@@ -495,6 +500,228 @@ describe("email order messaging", () => {
     expect((await EmailWebhookEvent.findOne({ eventId: "evt-revoked" }))!.state).toBe(
       "QUARANTINED",
     );
+  });
+  async function replyFixture() {
+    const created = await order({ emailNotificationPending: true });
+    await initializeOrderEmail(created);
+    const alias = await EmailReplyAlias.findOne({ senderKind: "CUSTOMER" }).select(
+      "+encryptedAlias",
+    );
+    const address = readEmailPayload<string>(alias!.encryptedAlias);
+    const mail = {
+      from: "buyer@example.test",
+      to: [address],
+      cc: [],
+      bcc: [],
+      attachments: [],
+      received_for: [],
+      text: "Tomorrow please",
+      created_at: new Date(Date.now() - 86400000).toISOString(),
+      authentication: { dmarc: "pass" },
+      headers: {},
+    };
+    vi.spyOn(emailService, "getReceived").mockResolvedValue(mail);
+    return { created, mail, address };
+  }
+  it("accepts empty forwarding metadata, deduplicates concurrent distinct callbacks and isolates status", async () => {
+    const { created, address } = await replyFixture();
+    await saveWebhook("customer-1", incoming("same-email", address));
+    await saveWebhook("customer-2", incoming("same-email", address));
+    await Promise.all([processEmailWebhooks(1), processEmailWebhooks(1)]);
+    await processEmailWebhooks();
+    expect(await OrderMessage.countDocuments({ providerInboundId: "same-email" })).toBe(1);
+    expect(await EmailOutbox.countDocuments({ purpose: "STAFF_NOTIFICATION" })).toBe(1);
+    await EmailWebhookEvent.create({
+      eventId: "foreign",
+      emailId: "foreign",
+      eventType: "email.received",
+      payload: "encrypted",
+      state: "FAILED",
+      businessId: otherBusinessId,
+    });
+    await EmailWorkerHealth.create({ key: "email", heartbeatAt: new Date(), inboundOk: true });
+    const health = await request(app)
+      .get(`/api/orders/email-health?orderId=${created.id}`)
+      .expect(200);
+    expect(health.body.failed).toBe(0);
+    expect(health.body.checks).toBeDefined();
+    role = 1;
+    const viewer = await request(app).get("/api/orders/email-health").expect(200);
+    expect(viewer.body.checks).toBeUndefined();
+    expect(viewer.body.reasons).toBeUndefined();
+    expect(viewer.body.failed).toBe(0);
+    await CustomerOrder.updateOne({ _id: created._id }, { businessId: otherBusinessId });
+    await request(app).get(`/api/orders/email-health?orderId=${created.id}`).expect(404);
+  });
+  it("quarantines forged authentication, multiple aliases and unauthorized senders", async () => {
+    const { mail, address } = await replyFixture();
+    vi.mocked(emailService.getReceived).mockResolvedValue({
+      ...mail,
+      authentication: null,
+      headers: { "Authentication-Results": "mx; dmarc=pass" },
+    });
+    await saveWebhook("forged-auth", incoming("forged-auth", address));
+    await processEmailWebhooks();
+    expect((await EmailWebhookEvent.findOne({ eventId: "forged-auth" }))?.reason).toBe(
+      "AUTHENTICATION_UNCONFIRMED",
+    );
+    vi.mocked(emailService.getReceived).mockResolvedValue({
+      ...mail,
+      from: "intruder@example.test",
+    });
+    await saveWebhook("wrong-sender", incoming("wrong-sender", address));
+    await processEmailWebhooks();
+    expect((await EmailWebhookEvent.findOne({ eventId: "wrong-sender" }))?.reason).toBe(
+      "SENDER_NOT_AUTHORIZED",
+    );
+    const another = await order({ emailNotificationPending: true });
+    await initializeOrderEmail(another);
+    const second = await EmailReplyAlias.findOne({
+      senderKind: "CUSTOMER",
+      aliasHash: { $ne: (await EmailReplyAlias.findOne({ senderKind: "CUSTOMER" }))?.aliasHash },
+    }).select("+encryptedAlias");
+    vi.mocked(emailService.getReceived).mockResolvedValue({
+      ...mail,
+      cc: [readEmailPayload<string>(second!.encryptedAlias)],
+    });
+    await saveWebhook("ambiguous", incoming("ambiguous", address));
+    await processEmailWebhooks();
+    expect((await EmailWebhookEvent.findOne({ eventId: "ambiguous" }))?.reason).toBe(
+      "UNKNOWN_OR_AMBIGUOUS_ALIAS",
+    );
+    expect(await OrderMessage.countDocuments({ direction: "INBOUND" })).toBe(0);
+  });
+  it("previews without writes and resumes paginated recovery without notifications or activity regression", async () => {
+    const { created, mail, address } = await replyFixture();
+    vi.spyOn(emailService, "listReceived").mockImplementation(
+      async (cursor) =>
+        ({
+          data: [{ id: cursor ? "older-2" : "older-1", created_at: mail.created_at }],
+          has_more: !cursor,
+        }) as any,
+    );
+    const options = {
+      environment: "test",
+      from: "2020-01-01",
+      to: "2030-01-01",
+      batchSize: 1,
+      maxItems: 1,
+    };
+    const preview = await recoverEmailReplies(options);
+    expect(preview.counts.recoverable).toBe(1);
+    expect(await EmailRecoveryRun.countDocuments()).toBe(0);
+    expect(await EmailWebhookEvent.countDocuments()).toBe(0);
+    const first = await recoverEmailReplies({ ...options, apply: true });
+    expect(first.complete).toBe(false);
+    await EmailRecoveryRun.updateOne(
+      { runId: first.runId },
+      { $set: { leaseUntil: new Date(Date.now() + 60000), leaseToken: "another-operator" } },
+    );
+    await expect(
+      recoverEmailReplies({ ...options, apply: true, runId: first.runId }),
+    ).rejects.toThrow("RECOVERY_RUN_BUSY");
+    await EmailRecoveryRun.updateOne(
+      { runId: first.runId },
+      { $set: { leaseUntil: null, leaseToken: null } },
+    );
+    const second = await recoverEmailReplies({ ...options, apply: true, runId: first.runId });
+    expect(second.complete).toBe(true);
+    expect(second.counts.enqueued).toBe(2);
+    // The backfill's persisted suppression policy wins even when a live callback races it.
+    await processEmailWebhooks(1);
+    await saveWebhook("duplicate-live", incoming("older-1", address));
+    await processEmailWebhooks();
+    const messages = await OrderMessage.find({ direction: "INBOUND" }).sort({ sequence: 1 }).lean();
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.receivedAt.toISOString()).toBe(mail.created_at);
+    expect(
+      messages.every((message) => message.recovered && message.notificationPolicy === "SUPPRESS"),
+    ).toBe(true);
+    expect(await EmailOutbox.countDocuments({ purpose: "STAFF_NOTIFICATION" })).toBe(0);
+    const conversation = await OrderConversation.findOne({ orderId: created._id }).lean();
+    expect(conversation?.lastExcerpt).toContain("Thank you");
+    const inbox = await request(app).get("/api/orders/inbox").expect(200);
+    expect(inbox.body.items[0].unreadCount).toBe(2);
+    const repeat = await recoverEmailReplies({ ...options, maxItems: 10 });
+    expect(repeat.counts.alreadyStored).toBe(2);
+  });
+  it("requires explicit audited requeue for terminal events and rechecks authentication", async () => {
+    const { mail, address } = await replyFixture();
+    vi.mocked(emailService.getReceived).mockResolvedValue({ ...mail, authentication: null });
+    await saveWebhook("quarantined", incoming("held-email", address));
+    await processEmailWebhooks();
+    await saveWebhook("quarantined", incoming("held-email", address));
+    expect((await EmailWebhookEvent.findOne({ eventId: "quarantined" }))?.state).toBe(
+      "QUARANTINED",
+    );
+    vi.spyOn(emailService, "listReceived").mockResolvedValue({
+      data: [{ id: "held-email", created_at: mail.created_at }],
+      has_more: false,
+    } as any);
+    const options = {
+      environment: "test",
+      from: "2020-01-01",
+      to: "2030-01-01",
+      batchSize: 10,
+      maxItems: 10,
+      apply: true,
+    };
+    await recoverEmailReplies(options);
+    expect((await EmailWebhookEvent.findOne({ eventId: "quarantined" }))?.state).toBe(
+      "QUARANTINED",
+    );
+    await recoverEmailReplies({ ...options, requeue: true, reason: "Recheck after policy update" });
+    await processEmailWebhooks();
+    const held = await EmailWebhookEvent.findOne({ eventId: "quarantined" });
+    expect(held?.state).toBe("QUARANTINED");
+    expect(held?.replayAudit).toHaveLength(1);
+    expect(await OrderMessage.countDocuments({ direction: "INBOUND" })).toBe(0);
+  });
+  it("distinguishes missing setup, unverified receiving and observed healthy receiving", async () => {
+    const previous = {
+      provider: env.EMAIL_PROVIDER,
+      secret: env.RESEND_WEBHOOK_SECRET,
+      payload: env.EMAIL_PAYLOAD_SECRET,
+      url: env.EMAIL_WEBHOOK_URL,
+    };
+    try {
+      env.EMAIL_PROVIDER = "resend";
+      env.RESEND_WEBHOOK_SECRET = undefined;
+      let response = await request(app).get("/api/orders/email-health").expect(200);
+      expect(response.body.status).toBe("INCOMPLETE");
+      env.RESEND_WEBHOOK_SECRET = "fixture";
+      env.EMAIL_PAYLOAD_SECRET = "fixture-payload-secret-at-least-32-characters";
+      env.EMAIL_WEBHOOK_URL = "https://first.example.test/api/webhooks/email/resend";
+      const inspection = vi
+        .spyOn(emailService, "receivingWebhookConfigured")
+        .mockResolvedValue(false);
+      response = await request(app).get("/api/orders/email-health").expect(200);
+      expect(response.body.status).toBe("INCOMPLETE");
+      expect(response.body.reasons).toContain("RECEIVING_WEBHOOK_MISSING");
+      inspection.mockResolvedValue(true);
+      env.EMAIL_WEBHOOK_URL = "https://second.example.test/api/webhooks/email/resend";
+      await EmailWorkerHealth.create({ key: "email", heartbeatAt: new Date(), inboundOk: true });
+      response = await request(app).get("/api/orders/email-health").expect(200);
+      expect(response.body.status).toBe("UNVERIFIED");
+      await EmailWebhookEvent.create({
+        eventId: "processed",
+        emailId: "processed",
+        businessId,
+        eventType: "email.received",
+        state: "DONE",
+        processedAt: new Date(),
+        payload: "fixture",
+        source: "WEBHOOK",
+      });
+      response = await request(app).get("/api/orders/email-health").expect(200);
+      expect(response.body.status).toBe("HEALTHY");
+      expect(inspection).toHaveBeenCalledTimes(2);
+    } finally {
+      env.EMAIL_PROVIDER = previous.provider;
+      env.RESEND_WEBHOOK_SECRET = previous.secret;
+      env.EMAIL_PAYLOAD_SECRET = previous.payload;
+      env.EMAIL_WEBHOOK_URL = previous.url;
+    }
   });
   it("validates exact webhook bytes and rejects forged signatures", async () => {
     env.RESEND_WEBHOOK_SECRET = `whsec_${Buffer.from("test-signing-secret").toString("base64")}`;

@@ -25,6 +25,13 @@ afterEach(() => {
 });
 
 describe("environment validation", () => {
+  it("allows a blank webhook URL during setup and requires HTTPS callback URLs", async () => {
+    vi.stubEnv("EMAIL_WEBHOOK_URL", " ");
+    expect((await import("../src/config/env.js")).env.EMAIL_WEBHOOK_URL).toBeUndefined();
+    vi.resetModules();
+    vi.stubEnv("EMAIL_WEBHOOK_URL", "http://frontend.example.test/orders");
+    await expect(import("../src/config/env.js")).rejects.toThrow("EMAIL_WEBHOOK_URL");
+  });
   it.each(["missvbusiness.online", "replies.missvbusiness.online"])(
     "accepts a receiving domain: %s",
     async (domain) => {

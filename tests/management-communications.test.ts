@@ -43,24 +43,17 @@ describe("communication boundaries", () => {
   });
   it("treats missing authentication and automatic replies conservatively", () => {
     expect(inboundRisk({})).toBe("AUTHENTICATION_UNCONFIRMED");
-    expect(inboundRisk({ "Authentication-Results": "mx.test; dmarc=pass" })).toBeNull();
-    expect(inboundRisk({ "Auto-Submitted": "auto-replied" })).toBe("AUTOMATED_MESSAGE");
-    expect(inboundRisk({ "Authentication-Results": "dmarc=fail; spf=pass" })).toBe(
+    expect(inboundRisk({ "Authentication-Results": "dmarc=pass" })).toBe(
       "AUTHENTICATION_UNCONFIRMED",
     );
+    expect(
+      inboundRisk({ "Authentication-Results": "dmarc=pass" }, { dmarc: "fail", spf: "pass" }),
+    ).toBe("AUTHENTICATION_UNCONFIRMED");
+    expect(inboundRisk({}, { dmarc: "pass" })).toBeNull();
+    expect(inboundRisk({ "Auto-Submitted": "auto-replied" }, { dmarc: "pass" })).toBe(
+      "AUTOMATED_MESSAGE",
+    );
     expect(mailbox("Customer <CUSTOMER@example.test>")).toBe("customer@example.test");
-    expect(
-      inboundRisk(
-        { "Authentication-Results": "mx; spf=pass smtp.mailfrom=attacker.test" },
-        "owner@example.test",
-      ),
-    ).toBe("SENDER_AUTHENTICATION_NOT_ALIGNED");
-    expect(
-      inboundRisk(
-        { "Authentication-Results": "mx; dmarc=pass header.from=example.test" },
-        "owner@example.test",
-      ),
-    ).toBeNull();
   });
   it("displays only inert body text and separates quotations", () => {
     expect(

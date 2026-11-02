@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { env } from "../config/env.js";
+import { parseReceivedEmail, parseReceivedList, parseWebhookList } from "./inbound-email.js";
 
 export type EmailDeliveryResult = {
   provider: "RESEND" | "CONSOLE";
@@ -38,6 +39,20 @@ const escapeHtml = (value: string) =>
 class ResendEmailService {
   private readonly client = new Resend(env.RESEND_API_KEY);
 
+  private async receivingGet(path: string) {
+    const options = { headers: {}, signal: AbortSignal.timeout(10000) };
+    const { data, error } = await this.client.get<unknown>(path, options);
+    if (error || !data)
+      throw new Error(
+        error?.statusCode === 403 || error?.statusCode === 401
+          ? "PROVIDER_PERMISSION_DENIED"
+          : error?.statusCode === 404
+            ? "PROVIDER_EMAIL_UNAVAILABLE"
+            : "PROVIDER_RETRY",
+      );
+    return data;
+  }
+
   async send(input: EmailPayload, idempotencyKey: string): Promise<EmailDeliveryResult> {
     const { data, error } = await this.client.emails.send(
       {
@@ -60,9 +75,43 @@ class ResendEmailService {
   }
 
   async getReceived(id: string) {
-    const { data, error } = await this.client.emails.receiving.get(id);
-    if (error || !data) throw new Error("Inbound email content is temporarily unavailable");
-    return data;
+    return parseReceivedEmail(
+      await this.receivingGet(`/emails/receiving/${encodeURIComponent(id)}?html_format=cid`),
+    );
+  }
+
+  async listReceived(after?: string, limit = 50) {
+    return parseReceivedList(
+      await this.receivingGet(
+        `/emails/receiving?${new URLSearchParams({ limit: String(limit), ...(after ? { after } : {}) })}`,
+      ),
+    );
+  }
+
+  async receivingWebhookConfigured(endpoint?: string) {
+    let after: string | undefined;
+    for (let page = 0; page < 100; page++) {
+      const data = parseWebhookList(
+        await this.receivingGet(
+          `/webhooks?${new URLSearchParams({ limit: "100", ...(after ? { after } : {}) })}`,
+        ),
+      );
+      if (
+        data.data.some(
+          (hook) =>
+            hook.status === "enabled" &&
+            hook.events?.includes("email.received") &&
+            (endpoint
+              ? hook.endpoint === endpoint
+              : hook.endpoint.endsWith("/api/webhooks/email/resend")),
+        )
+      )
+        return true;
+      if (!data.has_more) return false;
+      after = data.data.at(-1)?.id;
+      if (!after) break;
+    }
+    throw new Error("WEBHOOK_INSPECTION_INCOMPLETE");
   }
 
   async getSent(id: string) {
@@ -105,6 +154,15 @@ class ResendEmailService {
 }
 
 class ConsoleEmailService {
+  async listReceived(
+    _after?: string,
+    _limit = 50,
+  ): Promise<{ data: { id: string; created_at: string }[]; has_more: boolean }> {
+    throw new Error("Receiving email requires Resend configuration");
+  }
+  async receivingWebhookConfigured(_endpoint?: string): Promise<boolean> {
+    return false;
+  }
   async send(_input: EmailPayload, _key: string): Promise<EmailDeliveryResult> {
     return { provider: "CONSOLE", status: "DEVELOPMENT", messageId: null };
   }
@@ -116,11 +174,11 @@ class ConsoleEmailService {
   async getSent(_id: string): Promise<Record<string, unknown>> {
     throw new Error("Email metadata requires Resend configuration");
   }
-  async sendVerificationEmail(input: VerificationEmail): Promise<EmailDeliveryResult> {
+  async sendVerificationEmail(_input: VerificationEmail): Promise<EmailDeliveryResult> {
     return { provider: "CONSOLE", status: "DEVELOPMENT", messageId: null };
   }
 
-  async sendCredentialResetEmail(input: CredentialResetEmail): Promise<EmailDeliveryResult> {
+  async sendCredentialResetEmail(_input: CredentialResetEmail): Promise<EmailDeliveryResult> {
     return { provider: "CONSOLE", status: "DEVELOPMENT", messageId: null };
   }
 }

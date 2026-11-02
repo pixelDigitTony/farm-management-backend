@@ -1,5 +1,7 @@
 # Resend setup for verification and order conversations
 
+For the missing-replies fix, follow [webhook activation and historical recovery](order-email-replies.md). Registering a webhook enables new ingestion; older emails require a separate recovery run.
+
 25 October 2026. Configure these values on the **backend**. No Resend secret belongs in frontend `VITE_*` variables. The app reads deployment environment variables or the backend's local `.env`; the template is [`.env.example`](../.env.example).
 
 ## 1. Verify a sending domain
@@ -64,6 +66,7 @@ RESEND_EMAIL_FROM_NAME=Your Business
 
 FRONTEND_URL=https://YOUR-FRONTEND-HOST
 RESEND_WEBHOOK_SECRET=REPLACE_WITH_WEBHOOK_SIGNING_SECRET
+EMAIL_WEBHOOK_URL=https://YOUR-BACKEND-HOST/api/webhooks/email/resend
 EMAIL_RECEIVING_DOMAIN=replies.example.com
 EMAIL_PAYLOAD_SECRET=REPLACE_WITH_A_NEW_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
 

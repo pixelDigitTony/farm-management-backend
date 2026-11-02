@@ -1,11 +1,23 @@
 import { env } from "../config/env.js";
+import { inTransaction } from "../lib/transaction.js";
 import {
   CustomerOrder,
   EmailOutbox,
   EmailReplyAlias,
   EmailWebhookEvent,
+  OrderConversation,
   OrderMessage,
 } from "../models/index.js";
+import {
+  INBOUND_POLICY_VERSION,
+  inboundRisk,
+  mailbox,
+  parseReceivedEmail,
+  recipientCandidates,
+} from "./inbound-email.js";
+
+export { inboundRisk, mailbox } from "./inbound-email.js";
+
 import { emailService } from "./email.service.js";
 import {
   protectEmailPayload,
@@ -20,10 +32,6 @@ import {
   storeOrderMessage,
 } from "./order-messaging.service.js";
 
-export function mailbox(value: string) {
-  const address = value.match(/<([^<>]+)>/)?.[1] ?? value;
-  return address.trim().toLowerCase();
-}
 export function inboundText(input: { text?: string | null; html?: string | null }) {
   const plain = (
     input.text ||
@@ -39,38 +47,6 @@ export function inboundText(input: { text?: string | null; html?: string | null 
     bodyText: (split >= 0 ? plain.slice(0, split) : plain).slice(0, 10000),
     quotedText: split >= 0 ? plain.slice(split).slice(0, 10000) : "",
   };
-}
-export function inboundRisk(headers: Record<string, string>, sender?: string) {
-  const normalized = Object.fromEntries(
-    Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)]),
-  );
-  if (
-    /auto-(?:replied|generated)/i.test(normalized["auto-submitted"] ?? "") ||
-    /bulk|list|junk/i.test(normalized.precedence ?? "") ||
-    /mailer-daemon|postmaster/i.test(normalized.from ?? "")
-  )
-    return "AUTOMATED_MESSAGE";
-  if (/yes|true/i.test(normalized["x-spam-flag"] ?? "")) return "SPAM";
-  const auth = normalized["authentication-results"] ?? "";
-  // Missing or failed authentication is quarantined, rather than forwarded using From alone.
-  if (!/\b(?:dmarc|dkim|spf)=pass\b/i.test(auth) || /\bdmarc=fail\b/i.test(auth))
-    return "AUTHENTICATION_UNCONFIRMED";
-  if (sender) {
-    const domain = sender.split("@").at(-1)?.toLowerCase();
-    const aligned = auth.split(";").some((part) => {
-      const signingDomain = part
-        .match(/\bheader\.(?:from|d)\s*=\s*"?([^\s;"]+)/i)?.[1]
-        ?.toLowerCase();
-      return (
-        domain &&
-        signingDomain &&
-        /\b(?:dmarc|dkim)=pass\b/i.test(part) &&
-        (signingDomain === domain || signingDomain.endsWith(`.${domain}`))
-      );
-    });
-    if (!aligned) return "SENDER_AUTHENTICATION_NOT_ALIGNED";
-  }
-  return null;
 }
 export async function saveWebhook(eventId: string, event: any) {
   if (
@@ -89,83 +65,124 @@ export async function saveWebhook(eventId: string, event: any) {
         emailId,
         eventType: event.type,
         payload: protectEmailPayload(event),
+        source: "WEBHOOK",
+        notificationPolicy: "LIVE",
       },
     },
     { upsert: true },
   );
 }
 
-async function processInbound(job: any, payload: any) {
-  const mail = (await emailService.getReceived(job.emailId)) as any;
-  const sender = mailbox(String(mail.from ?? payload.data.from ?? ""));
-  // Route by the provider's SMTP envelope recipients, not the sender-controlled To header.
-  const recipients: string[] = Array.isArray(mail.received_for) ? mail.received_for : [];
+export async function inspectInbound(value: unknown) {
+  const mail = parseReceivedEmail(value);
+  const candidates = recipientCandidates(mail);
   const aliases = await EmailReplyAlias.find({
-    aliasHash: { $in: recipients.map((address) => aliasHash(mailbox(address))) },
+    aliasHash: { $in: [...candidates.keys()].map(aliasHash) },
     revokedAt: null,
   }).lean();
-  const alias = aliases[0];
-  if (aliases.length !== 1 || !alias) {
-    job.state = "QUARANTINED";
-    job.reason = "UNKNOWN_OR_AMBIGUOUS_ALIAS";
-    return;
-  }
-  const orderConversation = await (
-    await import("../models/communication.models.js")
-  ).OrderConversation.findOne({ _id: alias.conversationId, businessId: alias.businessId }).lean();
-  const order = orderConversation
+  const alias = aliases.length === 1 ? aliases[0] : null;
+  if (!alias) return { mail, reason: "UNKNOWN_OR_AMBIGUOUS_ALIAS" };
+  const conversation = await OrderConversation.findOne({
+    _id: alias.conversationId,
+    businessId: alias.businessId,
+  }).lean();
+  const order = conversation
     ? await CustomerOrder.findOne({
-        _id: orderConversation.orderId,
+        _id: conversation.orderId,
         businessId: alias.businessId,
       }).lean()
     : null;
-  if (!order) {
-    job.state = "QUARANTINED";
-    job.reason = "ORDER_UNAVAILABLE";
-    return;
-  }
-  const risk = inboundRisk(mail.headers ?? {}, sender);
-  if (risk) {
-    job.state = risk === "AUTOMATED_MESSAGE" ? "DONE" : "QUARANTINED";
-    job.reason = risk;
-    return;
-  }
+  if (!order) return { mail, reason: "ORDER_UNAVAILABLE" };
+  const association = {
+    businessId: alias.businessId,
+    conversationId: alias.conversationId,
+    orderId: order._id,
+  };
+  const provenance = [
+    ...new Set(
+      [...candidates]
+        .filter(([address]) => aliasHash(address) === alias.aliasHash)
+        .flatMap(([, fields]) => fields),
+    ),
+  ];
+  const risk = inboundRisk(mail.headers ?? {}, mail.authentication);
   const staff =
     alias.senderKind === "STAFF"
       ? await eligibleStaff(alias.businessId, alias.permittedUserId)
       : null;
-  const expected = alias.senderKind === "STAFF" ? staff?.email : orderConversation?.customerEmail;
-  if (!expected || sender !== expected.toLowerCase()) {
+  const expected = alias.senderKind === "STAFF" ? staff?.email : conversation?.customerEmail;
+  const reason =
+    risk ??
+    (!expected || mailbox(mail.from) !== mailbox(expected) ? "SENDER_NOT_AUTHORIZED" : null);
+  return { mail, alias, order, staff, association, provenance, reason };
+}
+async function processInbound(job: any) {
+  const inspection = await inspectInbound(await emailService.getReceived(job.emailId));
+  job.policyVersion = INBOUND_POLICY_VERSION;
+  if (inspection.association) Object.assign(job, inspection.association);
+  job.recipientProvenance = inspection.provenance ?? [];
+  const { mail, alias, order, staff } = inspection;
+  if (inspection.reason || !alias || !order) {
+    job.reason = inspection.reason;
+    job.state = inspection.reason === "AUTOMATED_MESSAGE" ? "DONE" : "QUARANTINED";
+    return;
+  }
+  // Historical staff mail must never be sent again by a customer-reply import.
+  if (
+    (job.source === "PROVIDER_BACKFILL" || job.notificationPolicy === "SUPPRESS") &&
+    alias.senderKind !== "CUSTOMER"
+  ) {
     job.state = "QUARANTINED";
-    job.reason = "SENDER_NOT_AUTHORIZED";
+    job.reason = "STAFF_BACKFILL_UNSUPPORTED";
     return;
   }
   const content = inboundText(mail);
-  const attachments = Boolean(mail.attachments?.length || payload.data.attachments?.length);
+  const attachments = mail.attachments.length > 0;
   if (!content.bodyText && !attachments) {
     job.state = "DONE";
     job.reason = "EMPTY_MESSAGE";
     return;
   }
-  const message = await storeOrderMessage(order, {
-    ...content,
-    bodyText: content.bodyText || "Attachment received; viewing is not available here.",
-    clientMessageId: `inbound-${job.emailId}`,
-    providerInboundId: job.emailId,
-    senderKind: alias.senderKind,
-    senderUserId: staff?._id,
-    senderName: staff?.name ?? order.customer.name,
-    direction: alias.senderKind === "CUSTOMER" ? "INBOUND" : "OUTBOUND",
-    hasAttachments: attachments,
-    rfcMessageId: String(mail.message_id ?? payload.data.message_id ?? "")
-      .replace(/[\r\n]/g, "")
-      .slice(0, 300),
-    inReplyTo: String(mail.headers?.["in-reply-to"] ?? "")
-      .replace(/[\r\n]/g, "")
-      .slice(0, 300),
+  const receivedAt = mail.created_at
+    ? new Date(mail.created_at)
+    : (job.receivedAt ?? job.createdAt);
+  if (!Number.isFinite(receivedAt.getTime())) throw new Error("INVALID_RECEIPT_TIME");
+  job.receivedAt = receivedAt;
+  // Commit the message, sequence and notification intent together. A concurrent import
+  // or callback observes the first persisted message's notification policy on retry.
+  await inTransaction(async () => {
+    const message = await storeOrderMessage(order, {
+      ...content,
+      bodyText: content.bodyText || "Attachment received; viewing is not available here.",
+      clientMessageId: `inbound-${job.emailId}`,
+      providerInboundId: job.emailId,
+      senderKind: alias.senderKind,
+      senderUserId: staff?._id,
+      senderName: staff?.name ?? order.customer.name,
+      direction: alias.senderKind === "CUSTOMER" ? "INBOUND" : "OUTBOUND",
+      hasAttachments: attachments,
+      receivedAt,
+      recovered: job.source === "PROVIDER_BACKFILL" || job.notificationPolicy === "SUPPRESS",
+      notificationPolicy: job.notificationPolicy ?? "LIVE",
+      rfcMessageId: String(mail.message_id ?? "")
+        .replace(/[\r\n]/g, "")
+        .slice(0, 300),
+      inReplyTo: String(
+        Object.entries(mail.headers ?? {}).find(
+          ([key]) => key.toLowerCase() === "in-reply-to",
+        )?.[1] ?? "",
+      )
+        .replace(/[\r\n]/g, "")
+        .slice(0, 300),
+    });
+    if (
+      alias.senderKind === "CUSTOMER" &&
+      message.notificationPolicy !== "SUPPRESS" &&
+      env.ORDER_EMAIL_INBOX_ENABLED === "true"
+    )
+      await notifyStaff(order, await ensureConversation(order), message);
   });
-  if (alias.senderKind === "CUSTOMER" && env.ORDER_EMAIL_INBOX_ENABLED === "true")
-    await notifyStaff(order, await ensureConversation(order), message);
+  job.reason = null;
   job.state = "DONE";
 }
 async function processDelivery(job: any, event: any) {
@@ -220,11 +237,19 @@ export async function processEmailWebhooks(limit = 10) {
     if (!job) break;
     try {
       const payload = readEmailPayload<any>(job.payload);
-      if (job.eventType === "email.received") await processInbound(job, payload);
+      if (job.eventType === "email.received") await processInbound(job);
       else await processDelivery(job, payload);
-    } catch {
+    } catch (error) {
       job.state = job.attemptCount >= 10 ? "FAILED" : "QUEUED";
-      job.reason = "PROCESSING_RETRY";
+      const code = error instanceof Error ? error.message : "";
+      job.reason = [
+        "PROVIDER_PERMISSION_DENIED",
+        "PROVIDER_EMAIL_UNAVAILABLE",
+        "INVALID_RECEIVED_EMAIL",
+        "INVALID_RECEIPT_TIME",
+      ].includes(code)
+        ? code
+        : "PROCESSING_RETRY";
       job.nextAttemptAt = new Date(Date.now() + Math.min(3600000, 15000 * 2 ** job.attemptCount));
       console.warn(
         JSON.stringify({
@@ -234,6 +259,7 @@ export async function processEmailWebhooks(limit = 10) {
         }),
       );
     }
+    if (job.state === "DONE") job.processedAt = new Date();
     job.leaseUntil = null;
     await job.save();
   }

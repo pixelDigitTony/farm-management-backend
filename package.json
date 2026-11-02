@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "email:recover": "tsx scripts/recover-email-replies.ts",
     "dev": "node scripts/run-backend.mjs dev",
     "build": "tsc -p tsconfig.json",
     "start": "node scripts/run-backend.mjs start",

@@ -13,6 +13,7 @@ import {
   OrderMessage,
   User,
 } from "../models/index.js";
+import { emailHealth } from "../services/email-health.service.js";
 import {
   eligibleStaff,
   ensureConversation,
@@ -26,6 +27,21 @@ import {
 import { requireHighestRole } from "./employee.routes.js";
 
 export const orderMessagingRouter = Router();
+orderMessagingRouter.get("/email-health", async (req, res) => {
+  const owner = getOwner(req);
+  const business = await Business.findById(owner.businessId).select("ownerRole").lean();
+  const order = req.query.orderId
+    ? await ownedOrder(owner.businessId, String(req.query.orderId))
+    : null;
+  res.set("Cache-Control", "no-store");
+  res.json(
+    await emailHealth(
+      owner.businessId,
+      owner.role === 99 || owner.role === business?.ownerRole,
+      order?._id,
+    ),
+  );
+});
 orderMessagingRouter.get("/email-settings", async (req, res) => {
   const owner = getOwner(req);
   const recipient = await eligibleStaff(owner.businessId);

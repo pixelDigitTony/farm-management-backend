@@ -1,9 +1,28 @@
-import { EmailOutbox, EmailWebhookEvent, OrderMessage } from "../models/index.js";
+import {
+  EmailOutbox,
+  EmailWebhookEvent,
+  EmailWorkerHealth,
+  OrderMessage,
+} from "../models/index.js";
 import { processEmailOutbox } from "./email-outbox.service.js";
 import { repairEmployeeVerification } from "./email-verification.service.js";
 import { processEmailWebhooks, reconcileSentMetadata } from "./email-webhook.service.js";
 import { retainDailyAnalytics } from "./landing-analytics.service.js";
 import { repairOrderEmail } from "./order-messaging.service.js";
+
+export async function runEmailStages(stages: { name: string; run: () => Promise<unknown> }[]) {
+  const outcomes: Record<string, boolean> = {};
+  for (const stage of stages) {
+    try {
+      await stage.run();
+      outcomes[stage.name] = true;
+    } catch {
+      outcomes[stage.name] = false;
+      console.error(JSON.stringify({ event: "email_stage_error", stage: stage.name }));
+    }
+  }
+  return outcomes;
+}
 
 export function startEmailWorker() {
   let running: Promise<void> | undefined;
@@ -12,11 +31,18 @@ export function startEmailWorker() {
   const tick = () => {
     if (running) return;
     running = (async () => {
-      await repairEmployeeVerification();
-      await repairOrderEmail();
-      await processEmailOutbox();
-      await processEmailWebhooks();
-      await reconcileSentMetadata();
+      const outcomes = await runEmailStages([
+        { name: "inbound", run: processEmailWebhooks },
+        { name: "verification", run: repairEmployeeVerification },
+        { name: "orderRepair", run: repairOrderEmail },
+        { name: "outbound", run: processEmailOutbox },
+        { name: "metadata", run: reconcileSentMetadata },
+      ]);
+      await EmailWorkerHealth.updateOne(
+        { key: "email" },
+        { $set: { heartbeatAt: new Date(), inboundOk: outcomes.inbound } },
+        { upsert: true },
+      );
       if (Date.now() - lastHealth > 60000) {
         const oldest = await EmailOutbox.findOne({ state: { $in: ["QUEUED", "SENDING"] } })
           .sort({ createdAt: 1 })
@@ -42,6 +68,18 @@ export function startEmailWorker() {
           }),
         );
         lastHealth = Date.now();
+        const inboundStates = await EmailWebhookEvent.aggregate([
+          { $match: { eventType: "email.received" } },
+          {
+            $group: {
+              _id: { state: "$state", reason: "$reason" },
+              count: { $sum: 1 },
+              oldest: { $min: "$createdAt" },
+              lastProcessedAt: { $max: "$processedAt" },
+            },
+          },
+        ]);
+        console.info(JSON.stringify({ event: "email_inbound_health", states: inboundStates }));
       }
       if (Date.now() - lastMaintenance > 3600000) {
         await retainDailyAnalytics();

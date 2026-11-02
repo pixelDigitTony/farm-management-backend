@@ -18,7 +18,12 @@ import { enqueueEmail, protectEmailPayload, readEmailPayload } from "./email-out
 export const aliasHash = (value: string) =>
   createHash("sha256").update(value.toLowerCase()).digest("hex");
 export function inboxConfigured() {
-  return env.ORDER_EMAIL_INBOX_ENABLED === "true" && Boolean(env.EMAIL_RECEIVING_DOMAIN);
+  return (
+    env.ORDER_EMAIL_INBOX_ENABLED === "true" &&
+    Boolean(env.EMAIL_RECEIVING_DOMAIN) &&
+    (env.EMAIL_PROVIDER === "console" ||
+      Boolean(env.RESEND_WEBHOOK_SECRET && env.EMAIL_PAYLOAD_SECRET))
+  );
 }
 export async function ownedOrder(businessId: unknown, id: string) {
   if (!mongoose.isValidObjectId(id)) throw new HttpError(404, "Order was not found");
@@ -142,6 +147,9 @@ export async function storeOrderMessage(
     inReplyTo?: string;
     quotedText?: string;
     hasAttachments?: boolean;
+    receivedAt?: Date;
+    recovered?: boolean;
+    notificationPolicy?: "LIVE" | "SUPPRESS";
   },
 ) {
   const conversation = await ensureConversation(order);
@@ -179,9 +187,14 @@ export async function storeOrderMessage(
     {
       _id: conversation._id,
       businessId: order.businessId,
-      lastMessageAt: { $lte: existing.createdAt },
+      lastMessageAt: { $lte: existing.receivedAt ?? existing.createdAt },
     },
-    { $set: { lastMessageAt: existing.createdAt, lastExcerpt: existing.bodyText.slice(0, 120) } },
+    {
+      $set: {
+        lastMessageAt: existing.receivedAt ?? existing.createdAt,
+        lastExcerpt: existing.bodyText.slice(0, 120),
+      },
+    },
   );
   await queueOrderMessage(order, conversation, existing);
   return existing;
@@ -254,6 +267,8 @@ export function messageDto(message: any) {
     senderName: message.senderName,
     deliveryState: message.deliveryState,
     createdAt: message.createdAt,
+    receivedAt: message.receivedAt,
+    recovered: message.recovered,
   };
 }
 export async function unreadCount(businessId: unknown, conversationId: unknown, userId: unknown) {

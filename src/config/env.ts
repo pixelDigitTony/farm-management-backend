@@ -26,6 +26,23 @@ const envSchema = v.object({
   RESEND_EMAIL_FROM: v.optional(v.pipe(v.string(), v.email())),
   RESEND_EMAIL_FROM_NAME: v.optional(v.string(), "Miss V Business"),
   RESEND_WEBHOOK_SECRET: v.optional(v.string()),
+  EMAIL_WEBHOOK_URL: v.optional(
+    v.pipe(
+      v.string(),
+      v.url(),
+      v.check((value) => {
+        const url = new URL(value);
+        return (
+          url.protocol === "https:" &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash &&
+          url.pathname === "/api/webhooks/email/resend"
+        );
+      }),
+    ),
+  ),
   EMAIL_RECEIVING_DOMAIN: v.optional(
     v.pipe(
       v.string(),
@@ -56,6 +73,7 @@ for (const key of [
   "RESEND_API_KEY",
   "RESEND_EMAIL_FROM",
   "RESEND_WEBHOOK_SECRET",
+  "EMAIL_WEBHOOK_URL",
   "EMAIL_RECEIVING_DOMAIN",
   "EMAIL_PAYLOAD_SECRET",
   "PUBLIC_SITE_BASE_DOMAIN",

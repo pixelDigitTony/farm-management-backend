@@ -65,6 +65,9 @@ const messageSchema = new Schema(
     hasAttachments: { type: Boolean, default: false },
     clientMessageId: { type: String, required: true },
     providerInboundId: { type: String },
+    receivedAt: { type: Date, default: null },
+    recovered: { type: Boolean, default: false },
+    notificationPolicy: { type: String, enum: ["LIVE", "SUPPRESS"], default: "LIVE" },
     providerMessageId: { type: String, default: null },
     rfcMessageId: { type: String, default: null },
     inReplyTo: { type: String, default: null },
@@ -112,6 +115,16 @@ const webhookSchema = new Schema(
     eventId: { type: String, required: true, unique: true },
     eventType: { type: String, required: true },
     emailId: { type: String, required: true },
+    businessId: objectId("Business"),
+    conversationId: objectId("OrderConversation"),
+    orderId: objectId("CustomerOrder"),
+    source: { type: String, enum: ["WEBHOOK", "PROVIDER_BACKFILL"], default: "WEBHOOK" },
+    notificationPolicy: { type: String, enum: ["LIVE", "SUPPRESS"], default: "LIVE" },
+    receivedAt: { type: Date, default: null },
+    processedAt: { type: Date, default: null },
+    policyVersion: { type: String, default: null },
+    recipientProvenance: { type: [String], default: [] },
+    replayAudit: { type: [{ at: Date, reason: String, runId: String }], default: [] },
     payload: { type: String, required: true, select: false },
     state: {
       type: String,
@@ -128,6 +141,29 @@ const webhookSchema = new Schema(
 );
 webhookSchema.index({ state: 1, nextAttemptAt: 1, leaseUntil: 1 });
 webhookSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+webhookSchema.index({ businessId: 1, eventType: 1, state: 1, createdAt: 1 });
+webhookSchema.index({ emailId: 1 });
+
+const workerSchema = new Schema(
+  {
+    key: { type: String, unique: true, required: true },
+    heartbeatAt: Date,
+    inboundOk: Boolean,
+  },
+  schemaOptions,
+);
+const recoverySchema = new Schema(
+  {
+    runId: { type: String, unique: true, required: true },
+    options: { type: Schema.Types.Mixed, required: true },
+    cursor: String,
+    leaseUntil: { type: Date, default: null },
+    leaseToken: { type: String, default: null },
+    counts: { type: Schema.Types.Mixed },
+    state: { type: String, enum: ["RUNNING", "COMPLETE"], default: "RUNNING" },
+  },
+  schemaOptions,
+);
 
 export const EmailOutbox = createModel("EmailOutbox", outboxSchema);
 export const OrderConversation = createModel("OrderConversation", conversationSchema);
@@ -135,3 +171,5 @@ export const OrderMessage = createModel("OrderMessage", messageSchema);
 export const ConversationReadState = createModel("ConversationReadState", readSchema);
 export const EmailReplyAlias = createModel("EmailReplyAlias", aliasSchema);
 export const EmailWebhookEvent = createModel("EmailWebhookEvent", webhookSchema);
+export const EmailWorkerHealth = createModel("EmailWorkerHealth", workerSchema);
+export const EmailRecoveryRun = createModel("EmailRecoveryRun", recoverySchema);
