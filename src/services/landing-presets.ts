@@ -137,7 +137,7 @@ export function createLandingPreset(
     .sort((a, b) => Number(b.isFeatured) - Number(a.isFeatured));
   const resolvedGoal =
     goal ?? (definition.goal === "SHOP" && !active.length ? "CATALOG" : definition.goal);
-  const brand = business?.businessName?.slice(0, 120) || "Your brand";
+  const brand = business?.businessName?.slice(0, 120) || "Our business";
   const [primaryColor, backgroundColor, surfaceColor, textColor, accentColor] = palettes[id] as [
     string,
     string,
@@ -260,10 +260,10 @@ export function createLandingPreset(
       title: titles[id],
       body: "Discover our collection and the story behind it.",
       mediaUrl: "",
-      primaryLabel: resolvedGoal === "INQUIRY" ? "Explore offerings" : "Explore collection",
-      primaryUrl: `#${collectionAnchor}`,
-      secondaryLabel: "Get in touch",
-      secondaryUrl: "#contact",
+      primaryLabel: resolvedGoal === "INQUIRY" ? "Get in touch" : "Explore collection",
+      primaryUrl: resolvedGoal === "INQUIRY" ? "#contact" : `#${collectionAnchor}`,
+      secondaryLabel: resolvedGoal === "INQUIRY" ? "Explore offerings" : "Get in touch",
+      secondaryUrl: resolvedGoal === "INQUIRY" ? `#${collectionAnchor}` : "#contact",
       missionText: "Discover what we offer, directly from our business.",
       media: id === "editorial-studio" ? media("studio-portrait") : undefined,
       stripMedia:
@@ -350,14 +350,11 @@ export function createLandingPreset(
       "MEDIA_STORY",
       {
         heading,
-        body: "Add your story, materials or details here.",
+        body: "Explore the details.",
         frames: ids.map((x) => ({
           id: randomUUID(),
           media: media(x),
           caption: "",
-          ...(active[0]
-            ? { catalogRef: { sourceType: active[0].sourceType, sourceId: active[0].sourceId } }
-            : {}),
         })),
         action: action("Explore more", collectionAnchor),
       },
@@ -367,8 +364,11 @@ export function createLandingPreset(
   const offerings = block(
     "SHOWCASE",
     {
-      heading: id === "farm-and-market" ? "Choose your path" : "Our offerings",
-      body: "Discover the option that suits you.",
+      heading: id === "farm-and-market" ? "Featured products" : "Our offerings",
+      body:
+        id === "farm-and-market"
+          ? "Explore our collection."
+          : "Discover the option that suits you.",
       items: active.slice(0, id === "farm-and-market" ? 3 : 6).map((i) => ({
         id: randomUUID(),
         title: i.name,
@@ -384,8 +384,8 @@ export function createLandingPreset(
         attributes: [],
         actions: [
           action(
-            resolvedGoal === "SHOP" ? "Explore collection" : "Contact us",
-            resolvedGoal === "SHOP" ? collectionAnchor : "contact",
+            resolvedGoal === "INQUIRY" ? "Contact us" : "Browse collection",
+            resolvedGoal === "INQUIRY" ? "contact" : collectionAnchor,
           ),
         ],
       })),

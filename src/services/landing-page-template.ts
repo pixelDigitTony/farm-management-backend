@@ -65,7 +65,7 @@ export function defaultLandingSections(
           content: {
             eyebrow: "Welcome to our business",
             title: businessName.slice(0, 120),
-            body: "Explore our menu and products, choose your favorites, and place an order for pickup or delivery.",
+            body: "Explore our collection and contact us with any questions.",
             mediaUrl: media[0] ?? "",
             primaryLabel,
             primaryUrl,
@@ -146,7 +146,7 @@ export function defaultLandingSections(
         type: "CTA",
         content: {
           heading: "Ready to order?",
-          body: "Add your favorites to the cart, then choose pickup or delivery at checkout.",
+          body: "Browse what is available and choose your favorites.",
           buttonLabel: primaryLabel,
           buttonUrl: primaryUrl,
         },
