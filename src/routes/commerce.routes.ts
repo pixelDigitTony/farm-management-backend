@@ -35,10 +35,12 @@ import {
   orderStatusSchema,
   publicOrderSchema,
 } from "../validation/commerce.js";
+import { catalogMyDayRouter } from "./catalog-my-day.routes.js";
 
 export const catalogRouter = Router();
 export const orderRouter = Router();
 export const commercePublicRouter = Router();
+catalogRouter.use("/my-day", catalogMyDayRouter);
 
 catalogRouter.get("/products", async (request, response) => {
   const owner = getOwner(request);

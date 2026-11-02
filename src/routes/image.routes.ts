@@ -8,6 +8,7 @@ import { imageProcessingStatus } from "../images/service.js";
 import { HttpError } from "../lib/http-error.js";
 import { effectivePermissions } from "../lib/permissions.js";
 import { getOwner, requireApproved, requireOwner } from "../middleware/auth.js";
+import { publicImageLimiter } from "../middleware/rate-limit.js";
 import { ImageJob, ImageLock, StoredImage } from "../models/image.models.js";
 import { Business, LandingPage } from "../models/index.js";
 import { getPublishedCatalogItems } from "../services/commerce.service.js";
@@ -58,7 +59,7 @@ async function deliver(request: Request, response: Response, businessId?: unknow
   if (request.headers["if-none-match"] === `"${image.sha256}"`) return response.status(304).end();
   response.send(Buffer.isBuffer(image.bytes) ? image.bytes : Buffer.from(image.bytes.buffer));
 }
-publicImageRouter.get("/images/:id", async (request, response) => {
+publicImageRouter.get("/images/:id", publicImageLimiter, async (request, response) => {
   if (!mongoose.isValidObjectId(request.params.id)) throw new HttpError(404, "Image not found");
   const image = await StoredImage.findById(request.params.id).lean();
   if (!image) throw new HttpError(404, "Image not found");

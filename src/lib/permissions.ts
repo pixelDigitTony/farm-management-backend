@@ -110,6 +110,8 @@ export function requiredPermissions(rawPath: string, method = "GET"): string[] |
       action = "edit";
     if (area === "catalog" && method === "POST" && resource === "availability-preview")
       action = "view";
+    if (area === "catalog" && method === "POST" && path === "/catalog/my-day/preview")
+      action = "view";
   }
   if (area === "orders" && /\/messages(?:\/[^/]+\/retry)?$/.test(path) && method === "POST")
     action = "edit";

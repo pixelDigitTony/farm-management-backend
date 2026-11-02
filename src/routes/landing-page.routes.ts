@@ -3,11 +3,14 @@ import mongoose from "mongoose";
 import * as v from "valibot";
 import { env } from "../config/env.js";
 import { assertImageReferences } from "../images/references.js";
+import { myDayNextTransition, resolveMyDay } from "../lib/catalog-my-day.js";
 import { HttpError } from "../lib/http-error.js";
-import { availabilityInfo } from "../lib/product-availability.js";
+import { availabilityInfo, localDateAt } from "../lib/product-availability.js";
 import { getOwner } from "../middleware/auth.js";
+import { publicContentLimiter } from "../middleware/rate-limit.js";
 import {
   Business,
+  CatalogMyDayCampaign,
   CatalogProduct,
   LandingPage,
   LandingPageSavedTemplate,
@@ -615,67 +618,85 @@ pageRoutes.post("/unpublish", async (request: Request, response) => {
 landingPageRouter.use("/pages/:pageId", pageRoutes);
 landingPageRouter.use(pageRoutes);
 
-landingPagePublicRouter.get("/landing-pages/:slug", async (request, response) => {
-  const page = await LandingPage.findOne({
-    slug: request.params.slug.toLowerCase(),
-    isPublished: true,
-    publishedSnapshot: { $ne: null },
-    isArchived: { $ne: true },
-  }).lean();
-  if (!page) throw new HttpError(404, "Published page was not found");
-  const business = await Business.exists({ _id: page.businessId, isArchived: { $ne: true } });
-  if (!business) throw new HttpError(404, "Published page was not found");
-  const snapshot = page.publishedSnapshot as LandingPageVariantInput & {
-    siteTitle: string;
-    seoDescription: string;
-  };
-  const commerce = v.parse(
-    landingPageCommerceSettingsSchema,
-    snapshot.commerce ?? defaultLandingPageCommerceSettings,
-  );
-  const sections = normalizedSections(snapshot);
-  const menuItems = hasEnabledCatalog({ sections }, "MENU")
-    ? await getLandingMenuItems(page.businessId)
-    : [];
-  const now = new Date();
-  const catalogItems = await getPublishedCatalogItems(
-    page.businessId,
-    { ...snapshot, sections },
-    now,
-  );
-  const products = await CatalogProduct.find({ businessId: page.businessId, isActive: true })
-    .select("availabilitySchedule isActive")
-    .lean();
-  const transitions = products
-    .map((p) => availabilityInfo(p, now).nextTransitionAt)
-    .filter((time): time is string => Boolean(time))
-    .sort();
-  const allowedMenuIds = new Set(
-    catalogItems.filter((item) => item.sourceType === "MENU_ITEM").map((item) => item.sourceId),
-  );
-  response.set("Cache-Control", "no-store");
-  response.json({
-    slug: page.slug,
-    pageId: String(page._id),
-    businessId: String(page.businessId),
-    nextTransitionAt: transitions[0] ?? null,
-    serverTime: now.toISOString(),
-    siteTitle: snapshot.siteTitle,
-    seoDescription: snapshot.seoDescription,
-    publishedAt: page.publishedAt,
-    analyticsEnabled: env.LANDING_ANALYTICS_ENABLED === "true",
-    variant: {
-      schemaVersion: snapshot.schemaVersion ?? 1,
-      template: snapshot.template,
-      goal: snapshot.goal,
-      theme: snapshot.theme,
-      commerce,
-      sections,
-      components: (sections as Array<{ components: unknown[] }>).flatMap(
-        (section) => section.components,
-      ),
-    },
-    menuItems: menuItems.filter((item) => allowedMenuIds.has(String(item._id))),
-    catalogItems,
-  });
-});
+landingPagePublicRouter.get(
+  "/landing-pages/:slug",
+  publicContentLimiter,
+  async (request, response) => {
+    const page = await LandingPage.findOne({
+      slug: String(request.params.slug).toLowerCase(),
+      isPublished: true,
+      publishedSnapshot: { $ne: null },
+      isArchived: { $ne: true },
+    }).lean();
+    if (!page) throw new HttpError(404, "Published page was not found");
+    const business = await Business.findOne({ _id: page.businessId, isArchived: { $ne: true } })
+      .select("timezone")
+      .lean();
+    if (!business) throw new HttpError(404, "Published page was not found");
+    const snapshot = page.publishedSnapshot as LandingPageVariantInput & {
+      siteTitle: string;
+      seoDescription: string;
+    };
+    const commerce = v.parse(
+      landingPageCommerceSettingsSchema,
+      snapshot.commerce ?? defaultLandingPageCommerceSettings,
+    );
+    const sections = normalizedSections(snapshot);
+    const menuItems = hasEnabledCatalog({ sections }, "MENU")
+      ? await getLandingMenuItems(page.businessId)
+      : [];
+    const now = new Date();
+    const catalogItems = await getPublishedCatalogItems(
+      page.businessId,
+      { ...snapshot, sections },
+      now,
+    );
+    const products = await CatalogProduct.find({ businessId: page.businessId, isActive: true })
+      .select("availabilitySchedule isActive")
+      .lean();
+    const transitions = products
+      .map((p) => availabilityInfo(p, now).nextTransitionAt)
+      .filter((time): time is string => Boolean(time))
+      .sort();
+    const campaigns = await CatalogMyDayCampaign.find({
+      businessId: page.businessId,
+      landingPageId: page._id,
+      isEnabled: true,
+      endsAt: { $gt: now },
+    }).lean();
+    const campaignTransition = myDayNextTransition(campaigns, now);
+    if (campaignTransition) transitions.push(campaignTransition);
+    transitions.sort();
+    const timezone = business.timezone ?? "Asia/Manila";
+    const allowedMenuIds = new Set(
+      catalogItems.filter((item) => item.sourceType === "MENU_ITEM").map((item) => item.sourceId),
+    );
+    response.set("Cache-Control", "no-store");
+    response.json({
+      slug: page.slug,
+      pageId: String(page._id),
+      businessId: String(page.businessId),
+      nextTransitionAt: transitions[0] ?? null,
+      serverTime: now.toISOString(),
+      siteTitle: snapshot.siteTitle,
+      seoDescription: snapshot.seoDescription,
+      publishedAt: page.publishedAt,
+      analyticsEnabled: env.LANDING_ANALYTICS_ENABLED === "true",
+      variant: {
+        schemaVersion: snapshot.schemaVersion ?? 1,
+        template: snapshot.template,
+        goal: snapshot.goal,
+        theme: snapshot.theme,
+        commerce,
+        sections,
+        components: (sections as Array<{ components: unknown[] }>).flatMap(
+          (section) => section.components,
+        ),
+      },
+      menuItems: menuItems.filter((item) => allowedMenuIds.has(String(item._id))),
+      catalogItems,
+      myDay: resolveMyDay(campaigns, catalogItems, snapshot.goal, now),
+      myDayFrequency: { timezone, localDate: localDateAt(now, timezone) },
+    });
+  },
+);

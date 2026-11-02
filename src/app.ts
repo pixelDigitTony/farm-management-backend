@@ -11,7 +11,7 @@ import { auditOwnerInteraction } from "./middleware/activity-audit.js";
 import { requireApproved, requireOwner, requireSuperAdmin } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 import { requirePermissions } from "./middleware/permissions.js";
-import { authLimiter, publicContentLimiter } from "./middleware/rate-limit.js";
+import { authLimiter } from "./middleware/rate-limit.js";
 import { activityRouter } from "./routes/activity.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
@@ -77,7 +77,6 @@ app.use(
       ),
     credentials: true,
   }),
-  publicContentLimiter,
   publicImageRouter,
   landingPagePublicRouter,
   analyticsPublicRouter,

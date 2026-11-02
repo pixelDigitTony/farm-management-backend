@@ -18,6 +18,18 @@ export const authLimiter = rateLimit({
 export const publicContentLimiter = rateLimit({
   windowMs: 15 * 60_000,
   limit: 300,
+  identifier: "landing-pages",
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: jsonHandler,
+});
+
+// A catalog can request dozens of images per visit. Keep their burst allowance
+// independent from page reads, analytics, and order submission.
+export const publicImageLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 600,
+  identifier: "public-images",
   standardHeaders: "draft-8",
   legacyHeaders: false,
   handler: jsonHandler,

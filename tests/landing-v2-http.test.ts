@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StoredImage } from "../src/models/image.models.js";
 import {
   Business,
+  CatalogMyDayCampaign,
   CatalogProduct,
   LandingPage,
   LandingPageVariant,
@@ -112,6 +113,10 @@ beforeEach(() => {
   vi.spyOn(Business, "exists").mockResolvedValue({
     _id: new mongoose.Types.ObjectId(fixtures.businessId),
   });
+  vi.spyOn(Business, "findOne").mockReturnValue({
+    select: () => ({ lean: async () => ({ timezone: "Asia/Manila" }) }),
+  } as any);
+  vi.spyOn(CatalogMyDayCampaign, "find").mockReturnValue({ lean: async () => [] } as any);
   vi.spyOn(LandingPageVariant, "create").mockImplementation((async (record: any) => {
     const doc = new LandingPageVariant(record);
     documents.set(String(doc._id), doc);
