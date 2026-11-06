@@ -3,8 +3,10 @@ import mongoose from "mongoose";
 import * as v from "valibot";
 import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
+import { inactiveAccess, parseAccess, resolveLandingAccess } from "../lib/landing-access.js";
 import { getOwner } from "../middleware/auth.js";
 import {
+  Business,
   CatalogProduct,
   LandingPage,
   LandingPageSavedTemplate,
@@ -24,6 +26,57 @@ import { assertLandingCatalogReferences } from "../services/landing-references.j
 import { landingPageVariantUpdateSchema } from "../validation/landing-page.js";
 
 export const landingManagementRouter = Router();
+const accessInput = v.strictObject({
+  mode: v.picklist(["INACTIVE", "IMMEDIATE", "SCHEDULED", "LIMITED"]),
+  timezone: v.pipe(v.string(), v.maxLength(100)),
+  startLocal: v.optional(v.string()),
+  endLocal: v.optional(v.string()),
+  startNow: v.optional(v.boolean()),
+  expectedPageRevision: v.pipe(v.number(), v.integer(), v.minValue(1)),
+});
+landingManagementRouter.patch("/pages/:pageId/access", async (request, response) => {
+  const owner = getOwner(request);
+  const input = v.parse(accessInput, request.body);
+  const result = await idempotent(
+    owner.businessId,
+    request.get("Idempotency-Key"),
+    `access:${request.params.pageId}`,
+    input,
+    async () => {
+      const page = await ownedPage(request);
+      if (input.mode !== "INACTIVE" && (!page.isPublished || !page.publishedSnapshot))
+        throw new HttpError(422, "Publish this page before activating its link");
+      if (
+        (input.mode !== "LIMITED" && (input.endLocal || input.startNow)) ||
+        (!["LIMITED", "SCHEDULED"].includes(input.mode) && input.startLocal)
+      )
+        throw new HttpError(422, "Dates do not match the chosen activation option");
+      const publicAccess = {
+        ...parseAccess(input),
+        updatedAt: new Date(),
+        updatedByUserId: owner.userId,
+      };
+      const updated = await LandingPage.findOneAndUpdate(
+        {
+          _id: page._id,
+          businessId: owner.businessId,
+          ...revisionFilter(input.expectedPageRevision),
+        },
+        { $set: { publicAccess }, $inc: { revision: 1 } },
+        { new: true },
+      );
+      if (!updated)
+        throw new HttpError(
+          409,
+          "Page changed. Reload and review access settings before retrying.",
+          undefined,
+          "PAGE_REVISION_CONFLICT",
+        );
+      return updated.toObject();
+    },
+  );
+  response.set("Cache-Control", "no-store").json({ ...result, ...resolveLandingAccess(result) });
+});
 landingManagementRouter.get("/categories", async (request, response) =>
   response.json({ items: await catalogCategories(getOwner(request).businessId) }),
 );
@@ -73,9 +126,14 @@ landingManagementRouter.get("/pages", async (request, response) => {
   })
     .select("revision")
     .lean();
+  const timezone =
+    (await Business.findById(getOwner(request).businessId).select("timezone").lean())?.timezone ??
+    "Asia/Manila";
   response.json({
     items: items.map((page) => ({
       ...page,
+      ...resolveLandingAccess(page),
+      timezone,
       hasUnpublishedChanges:
         page.isPublished &&
         page.publishedSourceVariantRevision !==
@@ -125,7 +183,10 @@ landingManagementRouter.delete("/pages/:pageId", async (request, response) => {
   );
   const result = await LandingPage.updateOne(
     { _id: page._id, businessId: getOwner(request).businessId, ...revisionFilter(revision) },
-    { $set: { isArchived: true, isPublished: false }, $inc: { revision: 1 } },
+    {
+      $set: { isArchived: true, isPublished: false, publicAccess: inactiveAccess() },
+      $inc: { revision: 1 },
+    },
   );
   if (!result.modifiedCount)
     throw new HttpError(

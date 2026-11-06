@@ -19,7 +19,13 @@ export function errorHandler(
   if (error instanceof mongoose.Error.CastError)
     return response.status(422).json({ message: "Invalid record field or identifier" });
   if (error instanceof ValiError) {
-    return response.status(422).json({ message: "Validation failed", issues: error.issues });
+    return response
+      .status(422)
+      .json({
+        message: "Validation failed",
+        issues: error.issues,
+        details: { issues: error.issues },
+      });
   }
   if (error instanceof HttpError) {
     if (

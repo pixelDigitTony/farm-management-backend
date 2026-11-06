@@ -4,6 +4,7 @@ import mongoose, { type Types } from "mongoose";
 import * as v from "valibot";
 import { assertImageReferences } from "../images/references.js";
 import { HttpError } from "../lib/http-error.js";
+import { inactiveAccess } from "../lib/landing-access.js";
 import { inTransaction } from "../lib/transaction.js";
 import { getOwner } from "../middleware/auth.js";
 import {
@@ -206,6 +207,7 @@ export async function createPage(request: Request) {
           name: input.name,
           slug,
           siteTitle: input.name,
+          publicAccess: inactiveAccess(),
         });
         const variant = await LandingPageVariant.create({
           ...document,

@@ -7,6 +7,7 @@ import {
   Business,
   CatalogMyDayCampaign,
   CatalogProduct,
+  LandingOperation,
   LandingPage,
   LandingPageVariant,
   MenuItem,
@@ -51,6 +52,7 @@ vi.mock("../src/services/commerce.service.js", async (importOriginal) => {
       original.filterPublishedCatalogItems(snapshot, catalog),
   };
 });
+vi.mock("../src/lib/transaction.js", () => ({ inTransaction: (work: () => unknown) => work() }));
 const app = express();
 app.use(express.json());
 app.use("/api/landing-page", landingPageRouter);
@@ -89,6 +91,23 @@ function matches(doc: any, filter: any): boolean {
 }
 beforeEach(() => {
   documents = new Map();
+  const operations = new Map<string, any>();
+  vi.spyOn(LandingOperation, "findOne").mockImplementation(
+    (filter: any) => ({ lean: async () => operations.get(filter.key) ?? null }) as any,
+  );
+  vi.spyOn(LandingOperation, "create").mockImplementation((async (record: any) => {
+    operations.set(record.key, record);
+    return record;
+  }) as any);
+  vi.spyOn(LandingPage, "findOneAndUpdate").mockImplementation((async (
+    filter: any,
+    update: any,
+  ) => {
+    if (!matches(page, filter)) return null;
+    page.set(update.$set);
+    page.revision += update.$inc?.revision ?? 0;
+    return page;
+  }) as any);
   page = new LandingPage({
     _id: "507f1f77bcf86cd799439030",
     businessId: fixtures.businessId,
@@ -202,6 +221,15 @@ describe("V2 HTTP contracts with isolated model adapters (no database)", () => {
     expect(duplicate.theme).toEqual(saved.theme);
     expect(duplicate.sections).toEqual(saved.sections);
     await request(app).post(`/api/landing-page/variants/${saved._id}/publish`).expect(200);
+    // Publication prepares content; activation is an independent owner action.
+    expect(page.publicAccess.mode).toBe("INACTIVE");
+    await request(app).get("/api/public/landing-pages/isolated-store").expect(404);
+    page.publicAccess = {
+      mode: "IMMEDIATE",
+      startsAt: null,
+      endsAt: null,
+      timezone: "Asia/Manila",
+    };
     const snapshot = json(page.publishedSnapshot);
     const read = (await request(app).get("/api/public/landing-pages/isolated-store").expect(200))
       .body;
@@ -279,5 +307,58 @@ describe("V2 HTTP contracts with isolated model adapters (no database)", () => {
     expect(filterPublishedCatalogItems({ ...snapshot, schemaVersion: 1 }, items)).toEqual(items);
     snapshot.sections[0]!.components[0]!.content.catalogItemRefs = [];
     expect(filterPublishedCatalogItems(snapshot, items)).toEqual(items);
+  });
+});
+
+describe("owned public access HTTP contract", () => {
+  const path = "/api/landing-page/pages/507f1f77bcf86cd799439030/access";
+  it("activates independently, checks revision, preserves snapshot, and replays a retry", async () => {
+    const variant = await create();
+    await request(app).post(`/api/landing-page/variants/${variant._id}/publish`).expect(200);
+    const snapshot = json(page.publishedSnapshot);
+    const input = {
+      mode: "IMMEDIATE",
+      timezone: "Asia/Manila",
+      expectedPageRevision: page.revision,
+    };
+    const first = await request(app)
+      .patch(path)
+      .set("Idempotency-Key", "access_operation_12345")
+      .send(input)
+      .expect(200);
+    expect(first.body.isAccessible).toBe(true);
+    expect(json(page.publishedSnapshot)).toEqual(snapshot);
+    const revision = page.revision;
+    await request(app)
+      .patch(path)
+      .set("Idempotency-Key", "access_operation_12345")
+      .send(input)
+      .expect(200);
+    expect(page.revision).toBe(revision);
+    await request(app)
+      .patch(path)
+      .set("Idempotency-Key", "different_operation_123")
+      .send(input)
+      .expect(409);
+    await request(app).get("/api/public/landing-pages/isolated-store").expect(200);
+    await request(app)
+      .patch(path)
+      .set("Idempotency-Key", "disable_operation_1234")
+      .send({ ...input, mode: "INACTIVE", expectedPageRevision: revision })
+      .expect(200);
+    await request(app).get("/api/public/landing-pages/isolated-store").expect(404);
+    expect(json(page.publishedSnapshot)).toEqual(snapshot);
+  });
+  it("denies activation without publication and a different owner's page", async () => {
+    await request(app)
+      .patch(path)
+      .set("Idempotency-Key", "access_operation_12345")
+      .send({ mode: "IMMEDIATE", timezone: "UTC", expectedPageRevision: 1 })
+      .expect(422);
+    await request(app)
+      .patch(path.replace("507f1f77bcf86cd799439030", "507f1f77bcf86cd799439031"))
+      .set("Idempotency-Key", "access_operation_23456")
+      .send({ mode: "INACTIVE", timezone: "UTC", expectedPageRevision: 1 })
+      .expect(404);
   });
 });

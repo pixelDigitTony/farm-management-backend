@@ -52,6 +52,7 @@ beforeEach(() => {
       _id: new Types.ObjectId(),
       businessId: new Types.ObjectId(),
       slug: "test",
+      isPublished: true,
       publishedSnapshot: {
         commerce: { orderingEnabled: true },
         sections: [
@@ -160,4 +161,26 @@ describe("discounted checkout", () => {
     expect(result).toEqual({ order: previous, created: false });
     expect(CustomerOrder.create).not.toHaveBeenCalled();
   });
+});
+
+describe("closed storefront checkout", () => {
+  it.each(["INACTIVE", "SCHEDULED", "LIMITED"])(
+    "rejects new orders outside the %s access window",
+    async (mode) => {
+      vi.mocked(LandingPage.findOne).mockReturnValue({
+        lean: async () => ({
+          isPublished: true,
+          publishedSnapshot: {},
+          publicAccess: {
+            mode,
+            timezone: "UTC",
+            startsAt: mode === "SCHEDULED" ? "2030-01-02T00:00:00Z" : "2029-12-31T00:00:00Z",
+            endsAt: mode === "LIMITED" ? "2030-01-01T01:00:00Z" : null,
+          },
+        }),
+      } as any);
+      await expect(createPublicOrder("test", orderInput())).rejects.toMatchObject({ status: 404 });
+      expect(CustomerOrder.findOne).not.toHaveBeenCalled();
+    },
+  );
 });

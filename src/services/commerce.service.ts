@@ -6,6 +6,7 @@ import { assertImageReferences } from "../images/references.js";
 import { catalogPrice } from "../lib/catalog-pricing.js";
 import { decimal, moneyString } from "../lib/decimal.js";
 import { HttpError } from "../lib/http-error.js";
+import { resolveLandingAccess } from "../lib/landing-access.js";
 import { alwaysAvailable, availabilityInfo, effectiveActive } from "../lib/product-availability.js";
 import { inTransaction } from "../lib/transaction.js";
 import { LandingVisit } from "../models/analytics.models.js";
@@ -228,7 +229,8 @@ async function publishedOrderingContext(slug: string, now: Date) {
     publishedSnapshot: { $ne: null },
     isArchived: { $ne: true },
   }).lean();
-  if (!page) throw new HttpError(404, "Published page was not found");
+  if (!page || !resolveLandingAccess(page, now).isAccessible)
+    throw new HttpError(404, "This page is currently unavailable");
   const business = await Business.exists({ _id: page.businessId, isArchived: { $ne: true } });
   if (!business) throw new HttpError(404, "Published page was not found");
   const snapshot = page.publishedSnapshot as Record<string, unknown>;

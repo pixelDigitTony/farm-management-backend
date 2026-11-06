@@ -5,6 +5,7 @@ import { env } from "../config/env.js";
 import { assertImageReferences } from "../images/references.js";
 import { myDayNextTransition, resolveMyDay } from "../lib/catalog-my-day.js";
 import { HttpError } from "../lib/http-error.js";
+import { inactiveAccess, resolveLandingAccess } from "../lib/landing-access.js";
 import { availabilityInfo, localDateAt } from "../lib/product-availability.js";
 import { getOwner } from "../middleware/auth.js";
 import { publicContentLimiter } from "../middleware/rate-limit.js";
@@ -35,6 +36,7 @@ import {
   landingScenes,
   landingTemplates,
 } from "../services/landing-presets.js";
+import { assertPublishReady } from "../services/landing-publish-readiness.js";
 import { assertLandingCatalogReferences } from "../services/landing-references.js";
 import {
   defaultLandingPageCommerceSettings,
@@ -115,7 +117,15 @@ async function builderPayload(businessId: mongoose.Types.ObjectId, request: Requ
   ]);
   const normalizedVariants = variants.map((variant) => serializedVariant(variant));
   return {
-    page,
+    page: page
+      ? {
+          ...page,
+          ...resolveLandingAccess(page),
+          timezone:
+            (await Business.findById(businessId).select("timezone").lean())?.timezone ??
+            "Asia/Manila",
+        }
+      : page,
     variants: normalizedVariants,
     menuItems,
     catalogItems,
@@ -151,6 +161,7 @@ landingPageRouter.post("/", async (request, response) => {
   const page = await LandingPage.create({
     businessId: owner.businessId,
     isLegacyDefault: true,
+    publicAccess: inactiveAccess(),
     slug: await createSlug(business.businessName),
     siteTitle: business.businessName,
     seoDescription: `${business.businessName} public landing page`,
@@ -510,6 +521,11 @@ const publishVariant: RequestHandler = async (request, response) => {
       throw new HttpError(422, "Show at least one component before publishing");
     await assertImageReferences(input, owner.businessId);
     await assertLandingCatalogReferences(input, owner.businessId);
+    assertPublishReady(input);
+    if (!page.publicAccess)
+      page.publicAccess = page.isPublished
+        ? { ...inactiveAccess(), mode: "IMMEDIATE" }
+        : inactiveAccess();
     page.isPublished = true;
     page.publishedVariantId = variant._id;
     page.publishedSnapshot = {
@@ -538,6 +554,7 @@ const publishVariant: RequestHandler = async (request, response) => {
       {
         $set: {
           isPublished: true,
+          publicAccess: page.publicAccess,
           publishedVariantId: variant._id,
           publishedSnapshot: page.publishedSnapshot,
           publishedAt: page.publishedAt,
@@ -589,7 +606,12 @@ pageRoutes.post("/unpublish", async (request: Request, response) => {
         ...revisionFilter(page.revision ?? 1),
       },
       {
-        $set: { isPublished: false, publishedSnapshot: null, publishedAt: null },
+        $set: {
+          isPublished: false,
+          publishedSnapshot: null,
+          publishedAt: null,
+          publicAccess: inactiveAccess(),
+        },
         $unset: { publishedVariantId: 1, publishedByUserId: 1, publishedSourceVariantRevision: 1 },
         $inc: { revision: 1 },
       },
@@ -605,6 +627,7 @@ pageRoutes.post("/unpublish", async (request: Request, response) => {
     response.json(updated.toObject());
     return;
   }
+  page.publicAccess = inactiveAccess();
   page.isPublished = false;
   page.publishedVariantId = undefined;
   page.publishedSnapshot = null;
@@ -628,7 +651,9 @@ landingPagePublicRouter.get(
       publishedSnapshot: { $ne: null },
       isArchived: { $ne: true },
     }).lean();
-    if (!page) throw new HttpError(404, "Published page was not found");
+    response.set("Cache-Control", "no-store");
+    if (!page || !resolveLandingAccess(page).isAccessible)
+      throw new HttpError(404, "This page is currently unavailable");
     const business = await Business.findOne({ _id: page.businessId, isArchived: { $ne: true } })
       .select("timezone")
       .lean();
@@ -664,6 +689,8 @@ landingPagePublicRouter.get(
       isEnabled: true,
       endsAt: { $gt: now },
     }).lean();
+    const accessTransition = resolveLandingAccess(page, now).nextTransitionAt;
+    if (accessTransition) transitions.push(accessTransition);
     const campaignTransition = myDayNextTransition(campaigns, now);
     if (campaignTransition) transitions.push(campaignTransition);
     transitions.sort();
@@ -678,6 +705,7 @@ landingPagePublicRouter.get(
       businessId: String(page.businessId),
       nextTransitionAt: transitions[0] ?? null,
       serverTime: now.toISOString(),
+      publicAccessEndsAt: page.publicAccess?.endsAt ?? null,
       siteTitle: snapshot.siteTitle,
       seoDescription: snapshot.seoDescription,
       publishedAt: page.publishedAt,

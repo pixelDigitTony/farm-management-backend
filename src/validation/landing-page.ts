@@ -438,8 +438,8 @@ const testimonialsComponent = v.object({
       v.array(
         v.object({
           id: componentId,
-          quote: requiredText(600),
-          author: requiredText(100),
+          quote: shortText(600),
+          author: shortText(100),
           thumbnail: v.optional(mediaAssetSchema),
           rating: v.optional(v.pipe(v.number(), v.finite(), v.minValue(1), v.maxValue(5))),
           catalogRef: v.optional(catalogReference),

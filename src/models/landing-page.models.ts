@@ -17,6 +17,7 @@ const landingPageSchema = new Schema(
     slug: { type: String, required: true, trim: true, lowercase: true },
     siteTitle: { type: String, required: true, trim: true },
     seoDescription: { type: String, default: "", trim: true },
+    publicAccess: { type: Schema.Types.Mixed, default: undefined },
     isPublished: { type: Boolean, default: false },
     publishedVariantId: objectId("LandingPageVariant"),
     publishedSnapshot: { type: Schema.Types.Mixed, default: null },
