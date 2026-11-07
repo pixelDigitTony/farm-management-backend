@@ -52,6 +52,44 @@ function variant() {
 }
 
 describe("landing-page validation", () => {
+  it("accepts independent typography roles on older components and rejects unsupported values", () => {
+    const hero = variant().sections[0]!.components[0]!;
+    expect(parse(landingPageComponentSchema, hero).appearance?.typography).toBeUndefined();
+    for (const fontFamily of [
+      "INTER",
+      "MANROPE",
+      "POPPINS",
+      "MONTSERRAT",
+      "LORA",
+      "PLAYFAIR_DISPLAY",
+      "OSWALD",
+      "ROBOTO_MONO",
+    ]) {
+      const typography = {
+        heading: { fontFamily },
+        body: { fontWeight: 600, fontStyle: "italic" },
+        label: { fontStyle: "normal" },
+      };
+      expect(
+        parse(landingPageComponentSchema, { ...hero, appearance: { typography } }).appearance
+          ?.typography,
+      ).toEqual(typography);
+    }
+    for (const heading of [
+      { fontFamily: "url(https://example.test/font.woff2)" },
+      { fontWeight: 450 },
+      { fontWeight: "700" },
+      { fontStyle: "oblique" },
+    ]) {
+      expect(() =>
+        parse(landingPageComponentSchema, {
+          ...hero,
+          appearance: { typography: { heading } },
+        }),
+      ).toThrow();
+    }
+  });
+
   it("preserves scroll settings and defaults older sections to unlimited height and catalogs to horizontal rows", () => {
     const section = {
       ...variant().sections[0],

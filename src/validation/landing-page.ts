@@ -116,8 +116,33 @@ export const blockLayouts = {
   TESTIMONIALS: ["GRID", "RAIL"],
   FAQ: ["GRID"],
 } as const;
+export const landingFontFamilies = [
+  "INTER",
+  "MANROPE",
+  "POPPINS",
+  "MONTSERRAT",
+  "LORA",
+  "PLAYFAIR_DISPLAY",
+  "OSWALD",
+  "ROBOTO_MONO",
+] as const;
+export const landingFontWeights = [400, 500, 600, 700] as const;
+export const landingFontStyles = ["normal", "italic"] as const;
+
+const landingTextStyleSchema = v.object({
+  fontFamily: v.optional(v.picklist(landingFontFamilies)),
+  fontWeight: v.optional(v.picklist(landingFontWeights)),
+  fontStyle: v.optional(v.picklist(landingFontStyles)),
+});
+export const landingTypographySchema = v.object({
+  heading: v.optional(landingTextStyleSchema),
+  body: v.optional(landingTextStyleSchema),
+  label: v.optional(landingTextStyleSchema),
+});
+
 const appearance = v.optional(
   v.object({
+    typography: v.optional(landingTypographySchema),
     layout: v.optional(
       v.picklist([
         "LEGACY",

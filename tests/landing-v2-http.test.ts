@@ -9,6 +9,7 @@ import {
   CatalogProduct,
   LandingOperation,
   LandingPage,
+  LandingPageSavedTemplate,
   LandingPageVariant,
   MenuItem,
 } from "../src/models/index.js";
@@ -197,7 +198,12 @@ describe("V2 HTTP contracts with isolated model adapters (no database)", () => {
     };
     created.theme.background.image = image;
     created.theme.background.mode = "COLOR";
-    created.sections[1].components[0].content.title = "My edited headline";
+    const hero = created.sections[1].components[0];
+    hero.content.title = "My edited headline";
+    hero.appearance.typography = {
+      heading: { fontFamily: "PLAYFAIR_DISPLAY", fontWeight: 600, fontStyle: "italic" },
+      label: { fontFamily: "INTER" },
+    };
     const saved = (
       await request(app)
         .patch(`/api/landing-page/variants/${created._id}`)
@@ -210,6 +216,23 @@ describe("V2 HTTP contracts with isolated model adapters (no database)", () => {
     expect(saved.theme.background.image).toEqual(image);
     expect(saved.theme.background.threeD).toEqual(created.theme.background.threeD);
     expect(saved.sections).toEqual(created.sections);
+    vi.spyOn(LandingPageVariant, "find").mockImplementation(
+      (filter: any) =>
+        ({
+          sort: () => ({
+            lean: async () =>
+              [...documents.values()].filter((d) => matches(d, filter)).map((d) => d.toObject()),
+          }),
+        }) as any,
+    );
+    vi.spyOn(Business, "findById").mockReturnValue({
+      lean: async () => ({ businessName: "Merchant" }),
+      select: () => ({ lean: async () => ({ timezone: "Asia/Manila" }) }),
+    } as any);
+    const reloaded = (await request(app).get("/api/landing-page").expect(200)).body;
+    expect(reloaded.variants.find((doc: any) => doc._id === saved._id).sections).toEqual(
+      saved.sections,
+    );
     const duplicate = (
       await request(app)
         .post("/api/landing-page/variants")
@@ -220,6 +243,37 @@ describe("V2 HTTP contracts with isolated model adapters (no database)", () => {
     expect(duplicate.template).toEqual(saved.template);
     expect(duplicate.theme).toEqual(saved.theme);
     expect(duplicate.sections).toEqual(saved.sections);
+    let storedTemplate: InstanceType<typeof LandingPageSavedTemplate> | undefined;
+    vi.spyOn(LandingPageSavedTemplate, "create").mockImplementation((async (record: any) => {
+      storedTemplate = new LandingPageSavedTemplate(record);
+      return storedTemplate;
+    }) as any);
+    vi.spyOn(LandingPageSavedTemplate, "findOne").mockImplementation(
+      (filter: any) =>
+        query(
+          storedTemplate && matches(storedTemplate, filter) ? storedTemplate.toObject() : null,
+        ) as any,
+    );
+    vi.spyOn(LandingPageVariant, "updateOne").mockResolvedValue({ matchedCount: 1 } as any);
+    const template = (
+      await request(app)
+        .post("/api/landing-page/saved-templates")
+        .set("Idempotency-Key", "test-typography-template")
+        .send({
+          name: "Reusable typography",
+          sourceVariantId: saved._id,
+          expectedVariantRevision: saved.revision,
+        })
+        .expect(201)
+    ).body;
+    expect(template.document.sections).toEqual(saved.sections);
+    const applied = (
+      await request(app)
+        .post("/api/landing-page/variants")
+        .send({ name: "From template", savedTemplateId: template._id })
+        .expect(201)
+    ).body;
+    expect(applied.sections).toEqual(saved.sections);
     await request(app).post(`/api/landing-page/variants/${saved._id}/publish`).expect(200);
     // Publication prepares content; activation is an independent owner action.
     expect(page.publicAccess.mode).toBe("INACTIVE");
